@@ -1,0 +1,34 @@
+# Maintainer: omarchy-gaming
+pkgname=gamemode
+pkgver=1.8.2
+pkgrel=1
+pkgdesc="Daemon/lib combo that applies temporary host optimisations to games, with omarchy-gaming's tuned /etc/gamemode.ini"
+arch=('x86_64')
+url="https://github.com/FeralInteractive/gamemode"
+license=('BSD-3-Clause')
+depends=('bash' 'dbus' 'glibc' 'libgcc' 'libinih' 'polkit' 'systemd-libs')
+makedepends=('meson' 'ninja')
+provides=('libgamemode.so' 'libgamemodeauto.so')
+backup=('etc/gamemode.ini')
+source=("https://github.com/FeralInteractive/gamemode/archive/refs/tags/${pkgver}.tar.gz"
+        "gamemode.ini")
+sha256sums=('2b4a20894822caf04767af6a1601130d6b718fc30b8a77895607341b1674740f'
+            '3bfd57e90748a46f367c307aa084cb1699f7a975506ab90208c3ef7272794d1e')
+
+build() {
+    cd "gamemode-$pkgver"
+    meson setup build \
+        --prefix=/usr \
+        --libexecdir=lib/gamemode \
+        --sbindir=bin \
+        --buildtype=plain \
+        -Dwith-examples=false
+    meson compile -C build
+}
+
+package() {
+    cd "gamemode-$pkgver"
+    meson install -C build --destdir "$pkgdir"
+    install -Dm644 LICENSE.txt -t "$pkgdir/usr/share/licenses/gamemode/"
+    install -Dm644 "$srcdir/gamemode.ini" "$pkgdir/etc/gamemode.ini"
+}

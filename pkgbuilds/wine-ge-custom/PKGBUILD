@@ -1,0 +1,16 @@
+# Maintainer: omarchy-gaming
+pkgname=wine-ge-custom
+pkgver=8.26
+pkgrel=1
+pkgdesc="GloriousEggroll's custom Wine build for Lutris/Bottles, prebuilt binary repack"
+arch=('x86_64')
+url="https://github.com/GloriousEggroll/wine-ge-custom"
+license=('custom')
+options=('!strip' 'emptydirs')
+source=("https://github.com/GloriousEggroll/wine-ge-custom/releases/download/GE-Proton${pkgver//./-}/wine-lutris-GE-Proton${pkgver//./-}-x86_64.tar.xz")
+sha512sums=('3abd578ed45a16096843936e0258799450e6a5751bc67afaf8c58cd245c40e62794a89af25ae482d74d5ca2b7527d17ff77232781c6d9cf97bc02976c2f960bd')
+
+package() {
+    install -d "$pkgdir/opt/wine-ge-custom"
+    cp -a "$srcdir/lutris-GE-Proton${pkgver//./-}-x86_64/." "$pkgdir/opt/wine-ge-custom/"
+}

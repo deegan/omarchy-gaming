@@ -1,0 +1,26 @@
+# Maintainer: omarchy-gaming
+pkgname=goverlay
+pkgver=1.9.0
+pkgrel=1
+pkgdesc="GUI to manage MangoHud, vkBasalt and other Vulkan/OpenGL overlay tools"
+arch=('x86_64')
+url="https://github.com/benjamimgois/goverlay"
+license=('GPL-3.0-only')
+depends=('qt6pas' 'qt6-base' 'mangohud' 'sdl2')
+makedepends=('lazarus-qt6')
+optdepends=('vkbasalt: configure vkBasalt'
+            'mesa-utils: OpenGL preview'
+            'vulkan-tools: Vulkan preview'
+            'replay-sorcery: instant replay solution')
+source=("$url/archive/refs/tags/$pkgver.tar.gz")
+sha256sums=('57f16d48d592e795d684f55d359ff6cf26b02f810d974c31d278d327d4b8858d')
+
+build() {
+    cd "$pkgname-$pkgver"
+    make LAZBUILDOPTS="--lazarusdir=/usr/lib/lazarus --widgetset=qt6"
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    make prefix=/usr libexecdir=/lib DESTDIR="$pkgdir" install
+}

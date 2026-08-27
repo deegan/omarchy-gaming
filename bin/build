@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Build one or all packages in pkgbuilds/, using a clean archlinux Docker
+# container so builds are reproducible and never touch the host.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PKGBUILDS_DIR="$ROOT/pkgbuilds"
+REPO_DIR="$ROOT/repo"
+BUILD_IMAGE="archlinux:latest"
+
+mkdir -p "$REPO_DIR"
+
+build_one() {
+    local pkg="$1"
+    local pkgdir="$PKGBUILDS_DIR/$pkg"
+
+    if [ ! -f "$pkgdir/PKGBUILD" ]; then
+        echo "error: $pkgdir/PKGBUILD not found" >&2
+        return 1
+    fi
+
+    echo "==> Building $pkg in a clean archlinux container"
+
+    docker run --rm \
+        -v "$pkgdir":/build \
+        -w /build \
+        "$BUILD_IMAGE" \
+        bash -c '
+            set -e
+            grep -q "^\[multilib\]" /etc/pacman.conf || printf "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
+            pacman -Syu --noconfirm --needed base-devel sudo git
+            useradd -m builder
+            echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+            chown -R builder:builder /build
+            su builder -c "makepkg -s --noconfirm --clean"
+        '
+
+    shopt -s nullglob
+    local artifacts=("$pkgdir"/*.pkg.tar.zst)
+    shopt -u nullglob
+
+    if [ ${#artifacts[@]} -eq 0 ]; then
+        echo "error: no package artifacts produced for $pkg" >&2
+        return 1
+    fi
+
+    mv -f "${artifacts[@]}" "$REPO_DIR/"
+    rm -rf "$pkgdir/src" "$pkgdir/pkg"
+    rm -f "$pkgdir"/*.log
+
+    echo "==> Built $pkg -> $REPO_DIR"
+}
+
+if [ "$#" -eq 0 ]; then
+    shopt -s nullglob
+    pkgs=("$PKGBUILDS_DIR"/*/PKGBUILD)
+    shopt -u nullglob
+
+    if [ ${#pkgs[@]} -eq 0 ]; then
+        echo "No PKGBUILDs found under $PKGBUILDS_DIR" >&2
+        exit 1
+    fi
+
+    for pkgbuild in "${pkgs[@]}"; do
+        build_one "$(basename "$(dirname "$pkgbuild")")"
+    done
+else
+    for pkg in "$@"; do
+        build_one "$pkg"
+    done
+fi

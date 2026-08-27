@@ -1,0 +1,22 @@
+# Maintainer: omarchy-gaming
+pkgname=heroic-games-launcher-bin
+pkgver=2.22.1
+pkgrel=1
+pkgdesc="Open source launcher for Epic, Amazon and GOG games, prebuilt binary repack"
+arch=('x86_64')
+url="https://heroicgameslauncher.com/"
+license=('GPL-3.0-only')
+depends=('which' 'gtk3')
+provides=('heroic-games-launcher')
+conflicts=('heroic-games-launcher')
+options=('!strip')
+_filename="Heroic-$pkgver-linux-x64.pacman"
+source=("https://github.com/Heroic-Games-Launcher/HeroicGamesLauncher/releases/download/v$pkgver/$_filename")
+noextract=("$_filename")
+sha256sums=('66ed041a93ac2817b744d3d0985194adfa408c8d35f64d9a8967fa5e2a58f2c1')
+
+package() {
+    tar -xJ -C "$pkgdir" -f "$srcdir/$_filename" usr opt
+    install -d "$pkgdir/usr/bin"
+    ln -s /opt/Heroic/heroic "$pkgdir/usr/bin/heroic"
+}

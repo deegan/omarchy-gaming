@@ -1,0 +1,8 @@
+{"name": "gamescope", "nice": -5, "sched": "normal"}
+{"name": "gamemoded", "nice": -5}
+{"name": "mangoapp", "nice": -3}
+{"name": "wine", "nice": -3}
+{"name": "wine64-preloader", "nice": -3}
+{"name": "wineserver", "nice": -3}
+{"name": "steamwebhelper", "nice": 5, "ioclass": "idle"}
+{"name": "reaper", "nice": 10, "ioclass": "idle"}

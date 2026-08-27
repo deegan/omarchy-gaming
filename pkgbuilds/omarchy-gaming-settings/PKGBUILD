@@ -1,0 +1,21 @@
+# Maintainer: omarchy-gaming
+pkgname=omarchy-gaming-settings
+pkgver=1
+pkgrel=1
+pkgdesc="omarchy-gaming system tuning: sysctl, ananicy-cpp rules for common gaming processes"
+arch=('any')
+license=('MIT')
+# steam-devices (multilib) already ships the controller udev rules Valve maintains
+# upstream (ValveSoftware/steam-devices) — no need to duplicate an unchanged package.
+depends=('ananicy-cpp' 'steam-devices')
+backup=('etc/sysctl.d/99-omarchy-gaming.conf'
+        'etc/ananicy.d/omarchy-gaming.rules')
+source=('99-omarchy-gaming-sysctl.conf'
+        'omarchy-gaming.rules')
+sha256sums=('7c623146326a923fa144f5a8c62a40757c5a926e0fb8563bae3d40c4f1fb0a04'
+            'c5702d43d9c39a83a9511e669f3a3c68dceb973a8a2325ea76f650329c576120')
+
+package() {
+    install -Dm644 "$srcdir/99-omarchy-gaming-sysctl.conf" "$pkgdir/etc/sysctl.d/99-omarchy-gaming.conf"
+    install -Dm644 "$srcdir/omarchy-gaming.rules" "$pkgdir/etc/ananicy.d/omarchy-gaming.rules"
+}

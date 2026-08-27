@@ -1,0 +1,33 @@
+# Maintainer: omarchy-gaming
+pkgname=protonup-qt
+_pkgname=ProtonUp-Qt
+pkgver=2.15.1
+pkgrel=1
+pkgdesc="Install and manage GE-Proton, Wine-GE and more for Steam, Lutris and Heroic"
+arch=('x86_64')
+url="https://github.com/DavidoTek/ProtonUp-Qt"
+license=('GPL-3.0-or-later')
+depends=('fuse2')
+options=('!strip')
+source=("$_pkgname-$pkgver-$CARCH.AppImage::https://github.com/DavidoTek/ProtonUp-Qt/releases/download/v$pkgver/$_pkgname-$pkgver-$CARCH.AppImage"
+        'protonup-qt.desktop'
+        'protonup-qt')
+sha256sums=('fd78efb1ffa0907a525784462494b9b42938f9fd7c019f3eaea3b8faf837e8c1'
+            '73a6452ab82b4b977653ed3445763c7907d087e46bfdd6ea61397cf297d99e9e'
+            'ec4727c5429e0ad7b571b97a2d1eaf3766d64e2526bd2d924415c326e2482c99')
+
+prepare() {
+    chmod 755 "$_pkgname-$pkgver-$CARCH.AppImage"
+    "./$_pkgname-$pkgver-$CARCH.AppImage" --appimage-extract >/dev/null
+}
+
+package() {
+    install -Dm755 "$_pkgname-$pkgver-$CARCH.AppImage" "$pkgdir/opt/protonup-qt/protonup-qt.AppImage"
+    install -Dm755 -t "$pkgdir/usr/bin" protonup-qt
+
+    cd squashfs-root/usr/share/icons
+    find . -type f -exec install -Dm644 "{}" "$pkgdir/usr/share/icons/{}" \;
+    cd "$srcdir"
+
+    install -Dm644 -t "$pkgdir/usr/share/applications" protonup-qt.desktop
+}

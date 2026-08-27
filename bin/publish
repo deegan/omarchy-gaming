@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Regenerate the pacman database in repo/ from whatever packages are there.
+# Set GPG_KEY_ID to sign the database (packages are expected to already be
+# signed at build time with the same key).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_DIR="$ROOT/repo"
+REPO_NAME="omarchy-gaming"
+
+if ! command -v repo-add >/dev/null 2>&1; then
+    echo "error: repo-add not found (install pacman-contrib)" >&2
+    exit 1
+fi
+
+shopt -s nullglob
+pkgs=("$REPO_DIR"/*.pkg.tar.zst)
+shopt -u nullglob
+
+if [ ${#pkgs[@]} -eq 0 ]; then
+    echo "error: no packages found in $REPO_DIR" >&2
+    exit 1
+fi
+
+sign_args=()
+if [ -n "${GPG_KEY_ID:-}" ]; then
+    sign_args=(-s -k "$GPG_KEY_ID")
+else
+    echo "warning: GPG_KEY_ID not set, publishing an unsigned database" >&2
+fi
+
+cd "$REPO_DIR"
+pkg_names=()
+for pkg in "${pkgs[@]}"; do
+    pkg_names+=("$(basename "$pkg")")
+done
+repo-add "${sign_args[@]}" "$REPO_NAME.db.tar.gz" "${pkg_names[@]}"
+
+echo "==> Published ${#pkgs[@]} package(s) to $REPO_NAME.db.tar.gz"
