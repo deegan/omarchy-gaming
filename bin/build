@@ -57,7 +57,23 @@ build_one() {
     rm -f "$pkgdir"/*.log
 
     echo "==> Built $pkg -> $REPO_DIR"
+
+    # Republish immediately so later packages in the same run (or a later
+    # `bin/build` invocation) can resolve dependencies on whatever we just
+    # built, e.g. omarchy-gaming-base depending on mesa/gamemode/mangohud.
+    if command -v repo-add >/dev/null 2>&1; then
+        "$ROOT/bin/publish" >/dev/null
+    else
+        echo "warning: repo-add not found on host, skipping auto-publish; run bin/publish manually" >&2
+    fi
 }
+
+# Packages that depend on other packages built in this same repo must come
+# after everything else, and after each other in this order — a plain
+# alphabetical build order can otherwise process a dependent (e.g.
+# omarchy-gaming-amd) before its own dependency (omarchy-gaming-base) even
+# exists yet.
+META_PKG_ORDER=(omarchy-gaming-base omarchy-gaming-amd omarchy-gaming-nvidia)
 
 if [ "$#" -eq 0 ]; then
     shopt -s nullglob
@@ -69,9 +85,28 @@ if [ "$#" -eq 0 ]; then
         exit 1
     fi
 
+    ordered=()
     for pkgbuild in "${pkgs[@]}"; do
-        build_one "$(basename "$(dirname "$pkgbuild")")"
+        pkg="$(basename "$(dirname "$pkgbuild")")"
+        is_meta=false
+        for m in "${META_PKG_ORDER[@]}"; do
+            [ "$pkg" = "$m" ] && is_meta=true && break
+        done
+        $is_meta || ordered+=("$pkg")
     done
+    for m in "${META_PKG_ORDER[@]}"; do
+        [ -d "$PKGBUILDS_DIR/$m" ] && ordered+=("$m")
+    done
+
+    failed=()
+    for pkg in "${ordered[@]}"; do
+        build_one "$pkg" || failed+=("$pkg")
+    done
+
+    if [ ${#failed[@]} -gt 0 ]; then
+        echo "==> Build failed for: ${failed[*]}" >&2
+        exit 1
+    fi
 else
     for pkg in "$@"; do
         build_one "$pkg"
