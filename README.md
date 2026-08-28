@@ -185,3 +185,16 @@ the database itself can be signed via the mechanism above.
   side-by-side fallback if something's wrong, unlike the kernel.
 - `omarchy-kernel-gaming` has been boot-tested successfully on real hardware, installed alongside a
   stock kernel.
+
+## License
+
+This repo's own original content (the PKGBUILDs, `bin/build`/`bin/publish`, `docker-compose.yml`,
+and the config files we wrote — `gamemode.ini`, `MangoHud.conf`, the `omarchy-gaming-settings`/
+`-nvidia`/`-amd` tuning) is [MIT](LICENSE), matching `omarchy` and `omarchy-pkgs`.
+
+That covers our own glue code, not what it builds: every package here still carries whatever
+license its upstream project uses (Mesa's is MIT/BSD-ish, `gamemode`'s is BSD-3-Clause, MangoHud's
+is MIT, the Linux kernel's is GPL-2.0, and so on) — packaging something doesn't relicense it. One
+specific exception worth naming: the kernel `.config` and BORE scheduler patch vendored into
+`pkgbuilds/omarchy-kernel-gaming/` are pulled directly from `CachyOS/linux-cachyos`, which is
+GPL-3.0-licensed.
