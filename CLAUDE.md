@@ -112,10 +112,20 @@ pinned to specific CachyOS commits (not `master`), not fetched at build time. Th
 takes ~25-30 min on 12 cores; `bin/build` handled it fine as a plain backgrounded run (no
 changes needed there). Verified: installs cleanly, the `initramfs` package's mkinitcpio
 hook correctly picks it up via the `pkgbase` file and builds a working
-`/boot/vmlinuz-omarchy-kernel-gaming` + initramfs, `depmod` runs via the `kmod` hook.
-**Not verified: actually booting it** — that needs a real reboot or QEMU, neither done
-from this session, and it should not be installed as the primary/only kernel on a real
-machine without that boot test happening first.
+`/boot/vmlinuz-omarchy-kernel-gaming` + initramfs, `depmod` runs via the `kmod` hook, and
+it **boots successfully** — confirmed on a real second machine (a spare PC running
+Omarchy, added as a pacman repo over the LAN), installed alongside the stock kernel and
+selected at the bootloader menu.
+
+The repo has also now been validated end-to-end as a real remote pacman repo, not just
+the local docker-compose loopback test: `docker-compose.yml`'s port mapping binds nginx
+to `0.0.0.0:8080` by default, so it's reachable from other LAN machines without any
+change; `restart: unless-stopped` plus Docker being enabled as a system service means the
+repo survives reboots of the host machine unattended. Still unsigned (no GPG key exists
+yet — every `bin/publish` run prints the "GPG_KEY_ID not set" warning) — currently
+acceptable for LAN testing via `SigLevel = Optional TrustAll`, but CLAUDE.md's "All
+packages are signed" line is aspirational, not yet true, if this repo is ever exposed
+beyond a trusted LAN.
 
 ## Next steps
 
