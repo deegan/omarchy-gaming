@@ -66,12 +66,22 @@ On the machine you want to install packages on, edit `/etc/pacman.conf`:
 
 ### Requirements
 
-- Docker + Docker Compose
+- Docker + Docker Compose — this is the only thing `bin/build` needs; every package builds inside
+  a throwaway `archlinux` container, so the host itself doesn't need an Arch toolchain and doesn't
+  even need to be Arch Linux. This repo has been built successfully from a NixOS host, for example.
+- **`repo-add`, on the host**, for `bin/publish` (this one command runs directly on the host, not
+  in Docker). On Arch, that's the `pacman-contrib` package. On a non-Arch host, the simplest fix is
+  a throwaway shell with just that one binary in `PATH` — on NixOS, `pacman-contrib` isn't its own
+  package (nixpkgs builds upstream pacman's whole source tree, `repo-add` included, as the single
+  `pacman` derivation), so use:
+  ```bash
+  nix-shell -p pacman --run "bin/publish"
+  ```
 - A few GB of disk for the published packages (currently ~1.5GB; grows if you rebuild Tier 4 with
   debug packages included)
-- If building from source rather than copying pre-built packages: no Arch toolchain needed on the
-  host itself (see below), but expect the Tier 4 builds (kernel, Mesa) to take 30 minutes to a few
-  hours combined, even on a many-core machine — see [Building packages](#building-packages)
+- If building from source rather than copying pre-built packages: expect the Tier 4 builds (kernel,
+  Mesa) to take 30 minutes to a few hours combined, even on a many-core machine — see
+  [Building packages](#building-packages)
 
 ### Fastest path: copy the already-built packages
 
