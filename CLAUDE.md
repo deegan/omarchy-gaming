@@ -13,7 +13,8 @@ bin/
 build ← build one or all packages
 publish ← run repo-add and refresh the database
 docker-compose.yml ← nginx serving ./repo on localhost:8080 for local testing
-CLAUDE.md
+CLAUDE.md ← this file (assistant/contributor instructions)
+README.md ← user-facing guide: using the repo, hosting your own instance, signing, troubleshooting
 
 
 ## Package tiers
