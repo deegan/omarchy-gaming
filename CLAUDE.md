@@ -127,10 +127,39 @@ acceptable for LAN testing via `SigLevel = Optional TrustAll`, but CLAUDE.md's "
 packages are signed" line is aspirational, not yet true, if this repo is ever exposed
 beyond a trusted LAN.
 
+The Mesa rebuild (Tier 4) is done: `pkgbuilds/mesa/` (17 packages: `mesa`, `opencl-mesa`,
+one `vulkan-*` per driver, the two `vulkan-mesa-*-layers` packages, `mesa-docs`) and
+`pkgbuilds/lib32-mesa/` (the same 16, minus docs). Both are CachyOS's own PKGBUILDs
+(themselves upstream Arch's PKGBUILD plus the SteamOS gamescope-fps-limiter patch) taken
+near-verbatim — full driver matrix (`gallium-drivers=all`, every `vulkan-drivers=` entry,
+rusticl, video-codecs=all), no LTO (upstream disabled it themselves over a real GCC14
+miscompile bug) — with exactly one change: `CFLAGS`/`CXXFLAGS`/`RUSTFLAGS` overridden to
+`-march=x86-64-v3` in `build()`, for both the 64-bit and the `--cross-file lib32` 32-bit
+build. That the v3 flags actually took effect (not just "the build didn't error") was
+checked directly: disassembling the built `vulkan-radeon` `.so` from both architectures
+shows AVX2 (`ymm`) register usage, which the generic x86-64/SSE2 baseline would never
+produce. Same package-name-replace pattern as `gamemode`/`mangohud` (no custom
+provides/conflicts needed) — `mesa`/`lib32-mesa`/`vulkan-radeon`/`lib32-vulkan-radeon`
+installed cleanly over the official ones in the docker-compose test. Build was ~35 min for
+both combined, faster than the multi-hour estimate given beforehand. `mesa-debug`/
+`lib32-mesa-debug` (1.1GB combined) are deliberately excluded from the published repo —
+same call already made for `mangohud-debug` earlier.
+
+**Not verified: actually running a graphical session on it.** Unlike the kernel, Mesa has
+no side-by-side fallback — a bad build breaks every GPU-accelerated app in place. This
+hasn't been tested on real hardware yet; the user's plan is to lean on Omarchy's
+snapshot/rollback system as the safety net for that test, rather than this repo adding
+its own (e.g. keeping the old package cached for a `pacman -U` downgrade).
+
 ## Next steps
 
-Only the Mesa rebuild remains (Tier 4): rebuilding Mesa with x86-64-v3 targeting, which
-requires a full rebuild pipeline this repo doesn't have yet (Mesa's own build is a much
-bigger dependency graph than anything built so far, and — unlike the kernel, which can
-coexist with the stock kernel as an alternate boot entry — a broken Mesa rebuild replacing
-the system one could break the graphical session outright).
+All items in the original tier list (Tiers 1-4) are now built, published, and verified as
+far as this local dev environment and one real spare machine allow. What's left is real
+hardware validation on the actual gaming rig this was all built for:
+
+1. Mesa: boot into a real graphical session with it installed and confirm nothing broke
+   (games render, compositor works, no black-screen/crash-loop) — the one thing this
+   session couldn't test.
+2. Longer-term: the repo is still unsigned (see above) and the host's LAN IP is DHCP-
+   assigned, not static — both fine for now, both worth revisiting if this setup needs to
+   be more durable than "point pacman at whatever IP this dev machine currently has."
