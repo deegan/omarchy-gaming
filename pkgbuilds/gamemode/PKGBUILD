@@ -1,15 +1,12 @@
 # Maintainer: omarchy-gaming
-pkgname=gamemode
+pkgbase=gamemode
+pkgname=('gamemode' 'lib32-gamemode')
 pkgver=1.8.2
-pkgrel=1
-pkgdesc="Daemon/lib combo that applies temporary host optimisations to games, with omarchy-gaming's tuned /etc/gamemode.ini"
+pkgrel=2
 arch=('x86_64')
 url="https://github.com/FeralInteractive/gamemode"
 license=('BSD-3-Clause')
-depends=('bash' 'dbus' 'glibc' 'libgcc' 'libinih' 'polkit' 'systemd-libs')
-makedepends=('meson' 'ninja')
-provides=('libgamemode.so' 'libgamemodeauto.so')
-backup=('etc/gamemode.ini')
+makedepends=('meson' 'ninja' 'dbus' 'libinih' 'systemd-libs' 'lib32-dbus' 'lib32-glibc')
 source=("https://github.com/FeralInteractive/gamemode/archive/refs/tags/${pkgver}.tar.gz"
         "gamemode.ini")
 sha256sums=('2b4a20894822caf04767af6a1601130d6b718fc30b8a77895607341b1674740f'
@@ -17,18 +14,51 @@ sha256sums=('2b4a20894822caf04767af6a1601130d6b718fc30b8a77895607341b1674740f'
 
 build() {
     cd "gamemode-$pkgver"
-    meson setup build \
+
+    meson setup build64 \
         --prefix=/usr \
         --libexecdir=lib/gamemode \
         --sbindir=bin \
         --buildtype=plain \
         -Dwith-examples=false
-    meson compile -C build
+    meson compile -C build64
+
+    # 32-bit companion build: client library only, no daemon/utils, so it
+    # doesn't need lib32-libinih or lib32-systemd-libs (neither exists in
+    # multilib). GameMode's own meson_options.txt documents this exact
+    # "no-daemon" mode as the intended way to build multilib client libs.
+    export CC="gcc -m32"
+    export PKG_CONFIG_PATH="/usr/lib32/pkgconfig:/usr/lib/i386-linux-gnu/pkgconfig"
+    meson setup build32 \
+        --prefix=/usr \
+        --libdir=lib32 \
+        --buildtype=plain \
+        -Dwith-examples=false \
+        -Dwith-util=false \
+        -Dwith-sd-bus-provider=no-daemon
+    meson compile -C build32
 }
 
-package() {
+package_gamemode() {
+    pkgdesc="Daemon/lib combo that applies temporary host optimisations to games, with omarchy-gaming's tuned /etc/gamemode.ini"
+    depends=('bash' 'dbus' 'glibc' 'libgcc' 'libinih' 'polkit' 'systemd-libs')
+    provides=('libgamemode.so' 'libgamemodeauto.so')
+    backup=('etc/gamemode.ini')
+
     cd "gamemode-$pkgver"
-    meson install -C build --destdir "$pkgdir"
+    meson install -C build64 --destdir "$pkgdir"
     install -Dm644 LICENSE.txt -t "$pkgdir/usr/share/licenses/gamemode/"
     install -Dm644 "$srcdir/gamemode.ini" "$pkgdir/etc/gamemode.ini"
+}
+
+package_lib32-gamemode() {
+    pkgdesc="32-bit libraries for gamemode"
+    depends=('lib32-dbus' 'lib32-glibc')
+
+    cd "gamemode-$pkgver"
+    meson install -C build32 --destdir "$pkgdir"
+    # Headers/pkgconfig are arch-independent and already shipped by
+    # gamemode; only ship the 32-bit libraries here.
+    rm -rf "$pkgdir/usr/include"
+    install -Dm644 LICENSE.txt -t "$pkgdir/usr/share/licenses/lib32-gamemode/"
 }

@@ -1,0 +1,179 @@
+# Maintainer: omarchy-gaming
+#
+# A fixed, opinionated build of CachyOS's BORE-scheduler kernel: same base
+# source, same BORE patch and base .config as CachyOS's own
+# linux-cachyos-bore, but without their ~30-variable build matrix (no LTO
+# variant, no scheduler choice, no bundled ZFS/nvidia-open/r8125 modules, no
+# debug package). Built for the x86-64-v3 microarchitecture baseline
+# (requires a 2013+ CPU with AVX2) rather than the machine that built it, so
+# the package is safe to redistribute.
+#
+# Patch/config are pinned, vendored copies of:
+#   https://github.com/CachyOS/kernel-patches/blob/2a6435ca82baff31fe6a8ea4e438985461f1da96/7.2/sched/0001-bore-cachy.patch
+#   https://github.com/CachyOS/linux-cachyos/blob/cc14281c838945254d594a0b64cd9a2ba5b59bd9/linux-cachyos-bore/config
+# Source tree is CachyOS's own pre-patched release tarball (not raw
+# kernel.org), since that's what the BORE patch is written against:
+#   https://github.com/CachyOS/linux/releases/tag/cachyos-7.2.1-1
+
+pkgbase=omarchy-kernel-gaming
+pkgname=('omarchy-kernel-gaming' 'omarchy-kernel-gaming-headers')
+_major=7.2
+_minor=1
+pkgver=${_major}.${_minor}
+pkgrel=1
+_tagrel=1
+_srcname=cachyos-${_major}.${_minor}-${_tagrel}
+pkgdesc="Linux kernel with the BORE scheduler and CachyOS gaming tuning, built x86-64-v3"
+arch=('x86_64')
+url="https://github.com/CachyOS/linux-cachyos"
+license=('GPL-2.0-only')
+options=('!strip' '!debug')
+makedepends=('bc' 'binutils' 'cpio' 'gettext' 'glibc' 'libelf' 'libgcc' 'openssl' 'pahole'
+             'perl' 'python' 'rust' 'rust-bindgen' 'rust-src' 'tar' 'xxhash' 'xz' 'zlib' 'zstd')
+source=("https://github.com/CachyOS/linux/releases/download/${_srcname}/${_srcname}.tar.gz"
+        "0001-bore-cachy.patch"
+        "config")
+sha256sums=('563a165dd2d383ab6176ade8c2d4fd0e1161d617ba57c995437770a347f46ce8'
+            '1809a4d4d6508a2a3f92cd8b3b385640583f90bd6cee46584f4bf105affd24a0'
+            '3df33112e3357feb6a899bbfc006f2ded15226d1b2eb741ac986d581b9ca7773')
+
+export KBUILD_BUILD_HOST=omarchy-gaming
+export KBUILD_BUILD_USER="$pkgbase"
+export KBUILD_BUILD_TIMESTAMP="$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH})"
+
+prepare() {
+    cd "$_srcname"
+
+    echo "-$pkgrel" > localversion.10-pkgrel
+    echo "-gaming" > localversion.20-pkgname
+
+    echo "Applying BORE scheduler patch..."
+    patch -Np1 < "../0001-bore-cachy.patch"
+
+    echo "Setting config..."
+    cp ../config .config
+
+    # x86-64-v3 baseline: portable to any 2013+ CPU, unlike CachyOS's own
+    # default of tuning for whatever machine runs the build.
+    scripts/config -e GENERIC_CPU -d MZEN4 -d X86_NATIVE_CPU --set-val X86_64_VERSION 3
+
+    # CachyOS's general tuning (I/O scheduler defaults, misc perf tweaks).
+    scripts/config -e CACHY
+
+    # BORE ("Burst-Oriented Response Enhancer") scheduler.
+    scripts/config -e SCHED_BORE
+
+    # No LTO: we build with GCC, not clang+lld, and want a well-tested
+    # non-LTO baseline rather than whatever the vendored config defaults to.
+    scripts/config -e LTO_NONE
+
+    # 1000Hz tick, full tickless, full preemption, O3, THP=always: CachyOS's
+    # own defaults for this kernel, kept as-is rather than re-litigated.
+    scripts/config -d HZ_300 -e HZ_1000 --set-val HZ 1000
+    scripts/config -d HZ_PERIODIC -d NO_HZ_IDLE -d CONTEXT_TRACKING_FORCE \
+        -e NO_HZ_FULL_NODEF -e NO_HZ_FULL -e NO_HZ -e NO_HZ_COMMON -e CONTEXT_TRACKING
+    scripts/config -e PREEMPT -d PREEMPT_LAZY
+    scripts/config -d CC_OPTIMIZE_FOR_PERFORMANCE -e CC_OPTIMIZE_FOR_PERFORMANCE_O3
+    scripts/config -d TRANSPARENT_HUGEPAGE_MADVISE -e TRANSPARENT_HUGEPAGE_ALWAYS
+
+    make prepare
+    yes "" | make config >/dev/null
+    diff -u ../config .config || :
+
+    make -s kernelrelease > version
+    echo "Prepared $pkgbase version $(<version)"
+}
+
+build() {
+    cd "$_srcname"
+    make -j"$(nproc)" all
+    make -C tools/bpf/bpftool vmlinux.h feature-clang-bpf-co-re=1
+}
+
+package_omarchy-kernel-gaming() {
+    pkgdesc="Linux kernel and modules with the BORE scheduler and CachyOS gaming tuning, built x86-64-v3"
+    depends=('coreutils' 'kmod' 'initramfs')
+    optdepends=('linux-firmware: firmware images needed for some devices'
+                'wireless-regdb: to set the correct wireless channels of your country')
+
+    cd "$_srcname"
+    local modulesdir="$pkgdir/usr/lib/modules/$(<version)"
+
+    echo "Installing boot image..."
+    install -Dm644 "$(make -s image_name)" "$modulesdir/vmlinuz"
+    echo "$pkgbase" | install -Dm644 /dev/stdin "$modulesdir/pkgbase"
+
+    echo "Installing modules..."
+    ZSTD_CLEVEL=19 make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
+        DEPMOD=/doesnt/exist modules_install
+
+    rm "$modulesdir"/build
+}
+
+package_omarchy-kernel-gaming-headers() {
+    pkgdesc="Headers and scripts for building modules against the omarchy-kernel-gaming kernel"
+    depends=('binutils' 'glibc' 'libelf' 'libgcc' 'openssl' 'pahole' 'xxhash' 'zlib' 'zstd'
+             "${pkgbase}")
+
+    cd "$_srcname"
+    local builddir="$pkgdir/usr/lib/modules/$(<version)/build"
+
+    install -Dt "$builddir" -m644 .config Makefile Module.symvers System.map \
+        localversion.* version vmlinux
+    install -Dt "$builddir" -m644 tools/bpf/bpftool/vmlinux.h
+
+    install -Dt "$builddir/kernel" -m644 kernel/Makefile
+    install -Dt "$builddir/arch/x86" -m644 arch/x86/Makefile
+    cp -t "$builddir" -a scripts
+    ln -srt "$builddir" "$builddir/scripts/gdb/vmlinux-gdb.py"
+
+    install -Dt "$builddir/tools/objtool" tools/objtool/objtool
+    if [ -f tools/bpf/resolve_btfids/resolve_btfids ]; then
+        install -Dt "$builddir/tools/bpf/resolve_btfids" tools/bpf/resolve_btfids/resolve_btfids
+    fi
+
+    echo "Installing headers..."
+    cp -t "$builddir" -a include
+    cp -t "$builddir/arch/x86" -a arch/x86/include
+    install -Dt "$builddir/arch/x86/kernel" -m644 arch/x86/kernel/asm-offsets.s
+
+    install -Dt "$builddir/drivers/md" -m644 drivers/md/*.h
+    install -Dt "$builddir/net/mac80211" -m644 net/mac80211/*.h
+    install -Dt "$builddir/drivers/media/i2c" -m644 drivers/media/i2c/msp3400-driver.h
+    install -Dt "$builddir/drivers/media/usb/dvb-usb" -m644 drivers/media/usb/dvb-usb/*.h
+    install -Dt "$builddir/drivers/media/dvb-frontends" -m644 drivers/media/dvb-frontends/*.h
+    install -Dt "$builddir/drivers/media/tuners" -m644 drivers/media/tuners/*.h
+    install -Dt "$builddir/drivers/iio/common/hid-sensors" -m644 drivers/iio/common/hid-sensors/*.h
+
+    find . -name 'Kconfig*' -exec install -Dm644 {} "$builddir/{}" \;
+
+    compgen -G "rust/*.rmeta" >/dev/null && install -Dt "$builddir/rust" -m644 rust/*.rmeta
+    compgen -G "rust/*.so" >/dev/null && install -Dt "$builddir/rust" rust/*.so
+
+    echo "Removing unneeded architectures..."
+    local arch
+    for arch in "$builddir"/arch/*/; do
+        [[ $arch = */x86/ ]] && continue
+        rm -r "$arch"
+    done
+
+    rm -r "$builddir/Documentation"
+    find -L "$builddir" -type l -printf 'Removing %P\n' -delete
+    find "$builddir" -type f -name '*.o' -printf 'Removing %P\n' -delete
+
+    echo "Stripping build tools..."
+    local file
+    while read -rd '' file; do
+        case "$(file -Sib "$file")" in
+            application/x-sharedlib\;*) strip -v --strip-unneeded "$file" ;;
+            application/x-archive\;*) strip -v --strip-debug "$file" ;;
+            application/x-executable\;*) strip -v --strip-all "$file" ;;
+            application/x-pie-executable\;*) strip -v --strip-unneeded "$file" ;;
+        esac
+    done < <(find "$builddir" -type f -perm -u+x ! -name vmlinux -print0)
+
+    strip -v --strip-debug "$builddir/vmlinux"
+
+    mkdir -p "$pkgdir/usr/src"
+    ln -sr "$builddir" "$pkgdir/usr/src/$pkgbase"
+}

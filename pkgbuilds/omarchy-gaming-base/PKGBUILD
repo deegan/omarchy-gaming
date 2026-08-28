@@ -1,0 +1,23 @@
+# Maintainer: omarchy-gaming
+pkgname=omarchy-gaming-base
+pkgver=1
+pkgrel=1
+pkgdesc="Meta-package pulling in the full omarchy-gaming stack: Proton/Wine, launchers, tools and system tuning"
+arch=('any')
+license=('MIT')
+depends=('proton-ge-custom'
+         'wine-ge-custom'
+         'protonup-qt'
+         'heroic-games-launcher-bin'
+         'steamtinkerlaunch'
+         'goverlay'
+         'gamemode'
+         'lib32-gamemode'
+         'mangohud'
+         'lib32-mangohud'
+         'omarchy-gaming-settings')
+optdepends=('steam: launch and manage your Steam game library')
+
+package() {
+    : # meta-package, nothing to install
+}

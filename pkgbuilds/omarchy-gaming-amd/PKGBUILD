@@ -1,0 +1,17 @@
+# Maintainer: omarchy-gaming
+pkgname=omarchy-gaming-amd
+pkgver=1
+pkgrel=1
+pkgdesc="AMD/RADV-specific meta-package for omarchy-gaming: Vulkan driver stack + PowerPlay tuning"
+arch=('any')
+license=('MIT')
+depends=('omarchy-gaming-base' 'vulkan-radeon' 'lib32-vulkan-radeon')
+optdepends=('lact: GPU control daemon/GUI for overclocking, fan curves and power limits'
+            'corectrl: alternative GPU control GUI for overclocking and fan curves')
+backup=('etc/modprobe.d/omarchy-gaming-amd.conf')
+source=('amdgpu-ppfeaturemask.conf')
+sha256sums=('aaede0804961aa29ec3ad28a4ce54e95ee43609e0fa7cb2e05be1328fc686179')
+
+package() {
+    install -Dm644 "$srcdir/amdgpu-ppfeaturemask.conf" "$pkgdir/etc/modprobe.d/omarchy-gaming-amd.conf"
+}

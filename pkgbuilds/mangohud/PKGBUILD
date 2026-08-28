@@ -1,0 +1,74 @@
+# Maintainer: omarchy-gaming
+pkgbase=mangohud
+pkgname=('mangohud' 'lib32-mangohud')
+pkgver=0.8.4
+pkgrel=1
+arch=('x86_64')
+url="https://github.com/flightlessmango/MangoHud"
+license=('MIT')
+makedepends=('meson' 'ninja' 'python-mako' 'glslang' 'pkgconf' 'wayland-protocols' 'git'
+             'dbus' 'libx11' 'libxkbcommon' 'wayland' 'glfw' 'libglvnd' 'libxrandr'
+             'lib32-glibc' 'lib32-libx11' 'lib32-libxkbcommon' 'lib32-wayland' 'lib32-dbus')
+source=("https://github.com/flightlessmango/MangoHud/releases/download/v${pkgver}/MangoHud-v${pkgver}-Source.tar.xz"
+        "MangoHud.conf")
+sha256sums=('bbe5a2b976313c53f21dc24b98bbed03226589460a0cce20d923cb2c36c9d8b0'
+            '798c9a8351a00b9955e28244ff35120c80650a2a2ad67e726c9ea56017253434')
+
+# The upstream "-Source" release tarball is a `meson dist --include-subprojects`
+# output: imgui/spdlog/vulkan-headers/vkroots/vk-bootstrap/implot are already
+# vendored under subprojects/, so the build needs no further network access.
+_build_args=(-Dwith_xnvctrl=disabled -Dtests=disabled -Dinclude_doc=false)
+
+build() {
+    cd "MangoHud-v${pkgver}"
+
+    meson setup build64 \
+        --prefix=/usr \
+        --buildtype=plain \
+        "${_build_args[@]}" \
+        -Dmangoapp=true \
+        -Dmangohudctl=true
+    meson compile -C build64
+
+    # 32-bit companion build, mirroring upstream's own pkgbuild/PKGBUILD:
+    # mangoapp/mangohudctl are 64-bit-only tools, so skip them here (also
+    # avoids needing a lib32-glfw package, which doesn't exist in multilib).
+    export CC="gcc -m32"
+    export CXX="g++ -m32"
+    export PKG_CONFIG_PATH="/usr/lib32/pkgconfig:/usr/lib/i386-linux-gnu/pkgconfig"
+    meson setup build32 \
+        --prefix=/usr \
+        --libdir=lib32 \
+        --buildtype=plain \
+        "${_build_args[@]}" \
+        -Dmangoapp=false \
+        -Dmangohudctl=false
+    meson compile -C build32
+}
+
+package_mangohud() {
+    pkgdesc="Vulkan/OpenGL performance overlay, with omarchy-gaming's tuned /etc/MangoHud.conf"
+    depends=('dbus' 'glibc' 'libx11' 'libxkbcommon' 'wayland' 'glfw' 'libglvnd' 'libxrandr')
+    optdepends=('python-numpy: mangoplot log plotting'
+                'python-matplotlib: mangoplot log plotting')
+    provides=('mangohud')
+    backup=('etc/MangoHud.conf')
+
+    cd "MangoHud-v${pkgver}"
+    DESTDIR="$pkgdir" meson install -C build64
+    install -Dm644 "$srcdir/MangoHud.conf" "$pkgdir/etc/MangoHud.conf"
+    install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/mangohud/"
+}
+
+package_lib32-mangohud() {
+    pkgdesc="32-bit libraries for mangohud"
+    depends=('lib32-dbus' 'lib32-glibc' 'lib32-libx11' 'lib32-libxkbcommon' 'lib32-wayland' 'lib32-libglvnd')
+    provides=('lib32-mangohud')
+
+    cd "MangoHud-v${pkgver}"
+    DESTDIR="$pkgdir" meson install -C build32
+    rm -rf "$pkgdir/usr/bin"
+    rm -rf "$pkgdir/usr/share"
+    install -m644 -Dt "$pkgdir/usr/share/vulkan/implicit_layer.d" "build32/src/MangoHud.x86.json"
+    install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/lib32-mangohud/"
+}

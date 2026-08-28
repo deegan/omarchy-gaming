@@ -62,12 +62,17 @@ bin/build proton-ge-custom
 # Refresh the pacman database
 bin/publish
 
-# Test from an Arch system or container
-# /etc/pacman.conf entry:
+# Test from an Arch system or container.
+# IMPORTANT: add this entry ABOVE [core]/[extra]/[multilib] in /etc/pacman.conf,
+# not below. Several of our packages (gamemode, mangohud, ...) intentionally
+# repackage a package that also exists in the official repos, and pacman
+# resolves an unqualified name (including transitively, e.g. via
+# omarchy-gaming-base's depends=()) using whichever repo is listed first. Below
+# the defaults, our tuned rebuilds silently lose to the vanilla ones.
 # [omarchy-gaming]
 # Server = http://localhost:8080
-# SigLevel = Optional
-pacman -Sy omarchy-gaming
+# SigLevel = Optional TrustAll
+pacman -Sy
 pacman -S proton-ge-custom
 ```
 
@@ -83,15 +88,39 @@ pacman -S proton-ge-custom
 
 Scaffolding is done: docker-compose + nginx, `bin/build`/`bin/publish`, and all of
 Tier 1 (`proton-ge-custom`, `wine-ge-custom`, `protonup-qt`, `heroic-games-launcher-bin`,
-`steamtinkerlaunch`, `goverlay`). From Tier 2/3, `gamemode` and `omarchy-gaming-settings`
-are also done. Everything built is verified against the local docker-compose repo server.
+`steamtinkerlaunch`, `goverlay`). Tier 2 is done: `gamemode`+`lib32-gamemode` and
+`mangohud`+`lib32-mangohud` (both split packages, 64-bit built with the full daemon/app,
+32-bit as a client-lib-only companion). Tier 3 is done: `omarchy-gaming-settings`,
+`omarchy-gaming-base` (meta-package depending on the whole stack), and the GPU-vendor
+metas `omarchy-gaming-nvidia` / `omarchy-gaming-amd`. Everything built is verified against
+the local docker-compose repo server, including that `omarchy-gaming-base` resolves our
+own rebuilt `gamemode`/`mangohud` rather than the vanilla `extra`/`multilib` ones (this
+only works if `[omarchy-gaming]` is listed *above* the default repos in `pacman.conf` —
+see the warning in "Local test workflow" above). `bin/build` now also mounts the local
+`repo/` as a `file://` pacman source inside the build container (only if `bin/publish`
+has already run), which is what lets meta-packages resolve same-repo dependencies via
+`makepkg -s`.
+
+`omarchy-kernel-gaming` (Tier 4) is done: `omarchy-kernel-gaming` +
+`omarchy-kernel-gaming-headers`, built from CachyOS's own `cachyos-7.2.1-1` release
+tarball with just the BORE scheduler patch applied, `x86-64-v3` baseline (portable,
+unlike CachyOS's own machine-tuned default), and their other build-matrix knobs (LTO,
+scheduler choice, bundled ZFS/nvidia-open/r8125, debug package) hardcoded off rather
+than left runtime-configurable — same pattern as `gamemode.ini`/`MangoHud.conf` being
+fixed opinions. Patch and base `.config` are vendored into `pkgbuilds/omarchy-kernel-gaming/`
+pinned to specific CachyOS commits (not `master`), not fetched at build time. The build
+takes ~25-30 min on 12 cores; `bin/build` handled it fine as a plain backgrounded run (no
+changes needed there). Verified: installs cleanly, the `initramfs` package's mkinitcpio
+hook correctly picks it up via the `pkgbase` file and builds a working
+`/boot/vmlinuz-omarchy-kernel-gaming` + initramfs, `depmod` runs via the `kmod` hook.
+**Not verified: actually booting it** — that needs a real reboot or QEMU, neither done
+from this session, and it should not be installed as the primary/only kernel on a real
+machine without that boot test happening first.
 
 ## Next steps
 
-1. `lib32-mangohud` and `mangohud` — compile from source, ship a default `MangoHud.conf`
-   (Tier 2)
-2. `lib32-gamemode` — 32-bit companion to the already-built `gamemode` (Tier 2)
-3. `omarchy-gaming-base` — meta-package pulling in the full stack (Tier 3)
-4. `omarchy-gaming-nvidia` / `omarchy-gaming-amd` — GPU-vendor meta packages (Tier 3)
-5. `omarchy-kernel-gaming` — custom kernel, BORE scheduler, tuned for desktop/gaming (Tier 4)
-6. Mesa rebuild with x86-64-v3 targeting (Tier 4, requires a full rebuild pipeline)
+Only the Mesa rebuild remains (Tier 4): rebuilding Mesa with x86-64-v3 targeting, which
+requires a full rebuild pipeline this repo doesn't have yet (Mesa's own build is a much
+bigger dependency graph than anything built so far, and — unlike the kernel, which can
+coexist with the stock kernel as an alternate boot entry — a broken Mesa rebuild replacing
+the system one could break the graphical session outright).

@@ -21,13 +21,21 @@ build_one() {
 
     echo "==> Building $pkg in a clean archlinux container"
 
+    # Mount our own published repo (if `bin/publish` has run) as a local
+    # pacman source, so meta-packages that depend on other omarchy-gaming
+    # packages (e.g. omarchy-gaming-base) can resolve them with `makepkg -s`
+    # without reaching outside our own infrastructure.
     docker run --rm \
         -v "$pkgdir":/build \
+        -v "$REPO_DIR":/repo:ro \
         -w /build \
         "$BUILD_IMAGE" \
         bash -c '
             set -e
             grep -q "^\[multilib\]" /etc/pacman.conf || printf "\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n" >> /etc/pacman.conf
+            if [ -f /repo/omarchy-gaming.db ]; then
+                grep -q "^\[omarchy-gaming\]" /etc/pacman.conf || printf "\n[omarchy-gaming]\nSigLevel = Optional TrustAll\nServer = file:///repo\n" >> /etc/pacman.conf
+            fi
             pacman -Syu --noconfirm --needed base-devel sudo git
             useradd -m builder
             echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
