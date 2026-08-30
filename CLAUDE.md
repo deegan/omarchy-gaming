@@ -21,6 +21,8 @@ README.md ← user-facing guide: using the repo, hosting your own instance, sign
 
 ### Tier 1 — AUR-only, must build ourselves
 - `proton-ge-custom` — binary repack of upstream GE release, no compilation
+- `proton-cachyos` — binary repack of CachyOS's performance-tuned Proton
+  (Steam Linux Runtime build, x86-64-v3 asset), same pattern
 - `wine-ge-custom` — same pattern
 - `protonup-qt` — binary repack
 - `heroic-games-launcher-bin` — binary repack
@@ -89,7 +91,19 @@ pacman -S proton-ge-custom
 
 Scaffolding is done: docker-compose + nginx, `bin/build`/`bin/publish`, and all of
 Tier 1 (`proton-ge-custom`, `wine-ge-custom`, `protonup-qt`, `heroic-games-launcher-bin`,
-`steamtinkerlaunch`, `goverlay`). Tier 2 is done: `gamemode`+`lib32-gamemode` and
+`steamtinkerlaunch`, `goverlay`). `proton-cachyos` was added to Tier 1 after the fact —
+CachyOS's own performance-focused Proton build (distinct upstream from GE: latency/perf
+patches like NTSYNC and tuned compiler flags rather than GE's broad game-compat patch
+set), packaged from their prebuilt Steam Linux Runtime release asset already built for
+`x86_64_v3` (matching this repo's v3-baseline stance elsewhere — Mesa, the custom
+kernel), rather than generating a `compatibilitytool.vdf` ourselves like the AUR
+`proton-cachyos-native` package does, since the SLR release tarball already ships a
+working one. Built and published successfully; contents verified directly from the
+built `.pkg.tar.zst` (compat-tool dir, `.vdf` files, `.INSTALL`, and the
+`modules-load.d` ntsync conf all land where expected). Not yet verified: actually
+selecting it as a game's compatibility tool in Steam and launching something with it —
+same "builds and installs" vs. "confirmed working at runtime" gap as the other
+unverified items below. Tier 2 is done: `gamemode`+`lib32-gamemode` and
 `mangohud`+`lib32-mangohud` (both split packages, 64-bit built with the full daemon/app,
 32-bit as a client-lib-only companion). Tier 3 is done: `omarchy-gaming-settings`,
 `omarchy-gaming-base` (meta-package depending on the whole stack), and the GPU-vendor
@@ -161,6 +175,8 @@ hardware validation on the actual gaming rig this was all built for:
 1. Mesa: boot into a real graphical session with it installed and confirm nothing broke
    (games render, compositor works, no black-screen/crash-loop) — the one thing this
    session couldn't test.
-2. Longer-term: the repo is still unsigned (see above) and the host's LAN IP is DHCP-
+2. `proton-cachyos`: select it as a game's compatibility tool in Steam and confirm it
+   actually launches something — build/install was verified, runtime wasn't.
+3. Longer-term: the repo is still unsigned (see above) and the host's LAN IP is DHCP-
    assigned, not static — both fine for now, both worth revisiting if this setup needs to
    be more durable than "point pacman at whatever IP this dev machine currently has."

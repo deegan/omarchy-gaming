@@ -1,0 +1,29 @@
+# Maintainer: omarchy-gaming
+pkgname=proton-cachyos
+_srctag=11.0-20260703
+pkgver=${_srctag//-/.}
+pkgrel=1
+pkgdesc="CachyOS's performance-tuned Proton (Steam Linux Runtime build, x86-64-v3), prebuilt binary repack"
+arch=('x86_64')
+url="https://github.com/CachyOS/proton-cachyos"
+license=('custom')
+options=('!strip' 'emptydirs')
+install=proton-cachyos.install
+source=("https://github.com/CachyOS/proton-cachyos/releases/download/cachyos-${_srctag}-slr/proton-cachyos-${_srctag}-slr-x86_64_v3.tar.xz"
+        "ntsync.conf")
+sha512sums=('5911a860b0dd11268f3736d33287a74993adda98e4c9444d15cf9f8988fcea9c1d93a01e14d1019021458add1755095ebf6c2a825ca0d49ce349b35b179cd013'
+            'SKIP')
+
+package() {
+    local _srcdir_name="proton-cachyos-${_srctag}-slr-x86_64_v3"
+    local instdir="$pkgdir/usr/share/steam/compatibilitytools.d/${pkgname}"
+
+    # Upstream's release tarball already ships a working compatibilitytool.vdf
+    # / toolmanifest.vdf (install_path "."), so this is a straight copy.
+    install -d "$instdir"
+    cp -a "$srcdir/${_srcdir_name}/." "$instdir/"
+
+    # CachyOS Proton's low-latency wine sync backend; harmless if the
+    # running kernel predates ntsync support, module load just no-ops.
+    install -Dm644 "$srcdir/ntsync.conf" "$pkgdir/usr/lib/modules-load.d/10-${pkgname}.conf"
+}
