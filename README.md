@@ -56,24 +56,27 @@ On the machine you want to install packages on, edit `/etc/pacman.conf`:
                                                                         # alongside your current kernel
    ```
 
-4. **Updating later:** use a full system upgrade, not `pacman -S omarchy-gaming-base` again —
-   meta-packages don't carry a version bump just because their dependencies got new builds, so
-   re-running `-S` on one sees "already satisfied" and does nothing. `pacman -Syu` checks every
-   installed package against the sync databases independently and will pick up new `mesa`,
-   `omarchy-kernel-gaming`, etc. builds correctly.
+4. **Updating later:** use `omarchy update`, not `pacman -S omarchy-gaming-base` again and not a
+   raw `pacman -Syu` — meta-packages don't carry a version bump just because their dependencies got
+   new builds, so re-running `-S` on one sees "already satisfied" and does nothing. Omarchy's own
+   update command does a full sync-and-upgrade pass (plus Omarchy's own migration/hook steps) and
+   will pick up new `mesa`, `omarchy-kernel-gaming`, etc. builds from this repo the same way it
+   picks up upstream ones. Omarchy discourages calling `pacman -Syu` directly, since it skips those
+   steps — `omarchy update` is the supported way to do a full-system upgrade.
 
 ## Hosting your own instance
 
 ### Requirements
 
-- Docker + Docker Compose — this is the only thing `bin/build` needs; every package builds inside
-  a throwaway `archlinux` container, so the host itself doesn't need an Arch toolchain and doesn't
-  even need to be Arch Linux. This repo has been built successfully from a NixOS host, for example.
-- **`repo-add`, on the host**, for `bin/publish` (this one command runs directly on the host, not
-  in Docker). On Arch, that's the `pacman-contrib` package. On a non-Arch host, the simplest fix is
-  a throwaway shell with just that one binary in `PATH` — on NixOS, `pacman-contrib` isn't its own
-  package (nixpkgs builds upstream pacman's whole source tree, `repo-add` included, as the single
-  `pacman` derivation), so use:
+- Docker + Docker Compose — this is the only hard requirement. `bin/build` always builds each
+  package inside a throwaway `archlinux` container, and `bin/publish` does the same for `repo-add`
+  whenever it isn't already installed on the host, so nothing here requires the host to be Arch
+  Linux or have an Arch toolchain. This repo has been built and published successfully from a NixOS
+  host, for example.
+- (Optional, faster) If the host already has `repo-add` in `PATH`, `bin/publish` uses it directly
+  instead of spinning up a container. On Arch, that's the `pacman-contrib` package. On NixOS,
+  `pacman-contrib` isn't its own package (nixpkgs builds upstream pacman's whole source tree,
+  `repo-add` included, as the single `pacman` derivation), so use:
   ```bash
   nix-shell -p pacman --run "bin/publish"
   ```
@@ -117,6 +120,10 @@ mounts the local `repo/` into the build container as a `file://` pacman source (
 has been run at least once), which is what lets meta-packages like `omarchy-gaming-base` resolve
 dependencies on this repo's own other packages.
 
+`bin/publish` uses the host's `repo-add` if it finds one in `PATH`, and otherwise runs `repo-add` in
+a throwaway `archlinux` container the same way — either way, no extra setup is needed on a
+non-Arch host.
+
 ### Exposing it beyond a trusted LAN
 
 `docker-compose.yml`'s `"8080:80"` port mapping binds to all interfaces by default, so the repo is
@@ -146,6 +153,8 @@ To sign:
    ```bash
    GPG_KEY_ID=<your-key-id> bin/publish
    ```
+   If `repo-add` isn't on the host, `bin/publish` signs from inside its fallback container instead,
+   mounting your host's `~/.gnupg` in so the key is still visible to `repo-add -s`.
 3. Distribute the public key to clients and change `SigLevel` in their `pacman.conf` from
    `Optional TrustAll` to something that actually verifies, e.g. `Required DatabaseOptional`, after
    importing the key with `pacman-key`.
@@ -158,7 +167,8 @@ the database itself can be signed via the mechanism above.
 - `bin/build` with no arguments builds every `PKGBUILD` under `pkgbuilds/`. `bin/build <name>
   [<name> ...]` builds specific packages.
 - `bin/publish` runs `repo-add` against everything currently in `repo/*.pkg.tar.zst` and refreshes
-  the pacman database. Run it after every `bin/build`.
+  the pacman database — using the host's `repo-add` if present, otherwise a throwaway `archlinux`
+  container (same approach `bin/build` uses). Run it after every `bin/build`.
 - To add a new package: create `pkgbuilds/<name>/PKGBUILD` following the conventions below, then
   `bin/build <name>` and `bin/publish`.
 
@@ -182,8 +192,8 @@ the database itself can be signed via the mechanism above.
   `<section-name>.db`, so `[omarchy-gaming]` must produce `omarchy-gaming.db`, matching exactly).
 - **Installed `omarchy-gaming-base` but still got the vanilla `mesa`/`gamemode`/etc.**: check repo
   ordering in `pacman.conf` — see the warning in [Using this repo](#using-this-repo).
-- **Ran `pacman -S omarchy-gaming-base` again and nothing updated**: use `pacman -Syu` instead — see
-  point 4 in [Using this repo](#using-this-repo).
+- **Ran `pacman -S omarchy-gaming-base` again and nothing updated**: use `omarchy update` instead —
+  see point 4 in [Using this repo](#using-this-repo).
 - **`lib32-*` packages "target not found"**: multilib isn't enabled in `pacman.conf`.
 
 ## Known limitations

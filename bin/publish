@@ -2,16 +2,17 @@
 # Regenerate the pacman database in repo/ from whatever packages are there.
 # Set GPG_KEY_ID to sign the database (packages are expected to already be
 # signed at build time with the same key).
+#
+# Uses the host's `repo-add` if it's in PATH (Arch, or `nix-shell -p pacman`).
+# Otherwise falls back to running `repo-add` inside a throwaway `archlinux`
+# Docker container, the same approach `bin/build` uses for package builds, so
+# this works on any host with just Docker installed.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_DIR="$ROOT/repo"
 REPO_NAME="omarchy-gaming"
-
-if ! command -v repo-add >/dev/null 2>&1; then
-    echo "error: repo-add not found (install pacman-contrib)" >&2
-    exit 1
-fi
+BUILD_IMAGE="archlinux:latest"
 
 shopt -s nullglob
 pkgs=("$REPO_DIR"/*.pkg.tar.zst)
@@ -22,6 +23,11 @@ if [ ${#pkgs[@]} -eq 0 ]; then
     exit 1
 fi
 
+pkg_names=()
+for pkg in "${pkgs[@]}"; do
+    pkg_names+=("$(basename "$pkg")")
+done
+
 sign_args=()
 if [ -n "${GPG_KEY_ID:-}" ]; then
     sign_args=(-s -k "$GPG_KEY_ID")
@@ -29,11 +35,34 @@ else
     echo "warning: GPG_KEY_ID not set, publishing an unsigned database" >&2
 fi
 
-cd "$REPO_DIR"
-pkg_names=()
-for pkg in "${pkgs[@]}"; do
-    pkg_names+=("$(basename "$pkg")")
-done
-repo-add "${sign_args[@]}" "$REPO_NAME.db.tar.gz" "${pkg_names[@]}"
+if command -v repo-add >/dev/null 2>&1; then
+    cd "$REPO_DIR"
+    repo-add "${sign_args[@]}" "$REPO_NAME.db.tar.gz" "${pkg_names[@]}"
+else
+    echo "==> repo-add not found on host, running it in a throwaway archlinux container" >&2
+
+    gpg_mount=()
+    if [ -n "${GPG_KEY_ID:-}" ]; then
+        if [ -d "$HOME/.gnupg" ]; then
+            # Read-write: repo-add's gpg invocation needs to touch lock files
+            # and the trustdb under here, not just read the secret key.
+            gpg_mount=(-v "$HOME/.gnupg:/root/.gnupg")
+        else
+            echo "error: GPG_KEY_ID set but $HOME/.gnupg not found, can't sign from inside the container" >&2
+            exit 1
+        fi
+    fi
+
+    docker run --rm \
+        -v "$REPO_DIR":/repo \
+        "${gpg_mount[@]}" \
+        -w /repo \
+        "$BUILD_IMAGE" \
+        bash -c '
+            set -e
+            pacman -Sy --noconfirm --needed pacman-contrib gnupg
+            repo-add "$@"
+        ' _ "${sign_args[@]}" "$REPO_NAME.db.tar.gz" "${pkg_names[@]}"
+fi
 
 echo "==> Published ${#pkgs[@]} package(s) to $REPO_NAME.db.tar.gz"
