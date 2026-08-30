@@ -100,10 +100,10 @@ kernel), rather than generating a `compatibilitytool.vdf` ourselves like the AUR
 `proton-cachyos-native` package does, since the SLR release tarball already ships a
 working one. Built and published successfully; contents verified directly from the
 built `.pkg.tar.zst` (compat-tool dir, `.vdf` files, `.INSTALL`, and the
-`modules-load.d` ntsync conf all land where expected). Not yet verified: actually
-selecting it as a game's compatibility tool in Steam and launching something with it —
-same "builds and installs" vs. "confirmed working at runtime" gap as the other
-unverified items below. Tier 2 is done: `gamemode`+`lib32-gamemode` and
+`modules-load.d` ntsync conf all land where expected). Now fully verified on real
+hardware too: installed via `pacman -S proton-cachyos` on the user's main gaming
+machine, selected as a game's compatibility tool in Steam, and launched successfully.
+Tier 2 is done: `gamemode`+`lib32-gamemode` and
 `mangohud`+`lib32-mangohud` (both split packages, 64-bit built with the full daemon/app,
 32-bit as a client-lib-only companion). Tier 3 is done: `omarchy-gaming-settings`,
 `omarchy-gaming-base` (meta-package depending on the whole stack), and the GPU-vendor
@@ -169,14 +169,13 @@ its own (e.g. keeping the old package cached for a `pacman -U` downgrade).
 ## Next steps
 
 All items in the original tier list (Tiers 1-4) are now built, published, and verified as
-far as this local dev environment and one real spare machine allow. What's left is real
-hardware validation on the actual gaming rig this was all built for:
+far as this local dev environment and one real spare machine allow. `proton-cachyos` has
+now additionally been validated on the actual gaming rig this was all built for (install +
+launched a game via Steam). What's left:
 
 1. Mesa: boot into a real graphical session with it installed and confirm nothing broke
    (games render, compositor works, no black-screen/crash-loop) — the one thing this
    session couldn't test.
-2. `proton-cachyos`: select it as a game's compatibility tool in Steam and confirm it
-   actually launches something — build/install was verified, runtime wasn't.
-3. Longer-term: the repo is still unsigned (see above) and the host's LAN IP is DHCP-
+2. Longer-term: the repo is still unsigned (see above) and the host's LAN IP is DHCP-
    assigned, not static — both fine for now, both worth revisiting if this setup needs to
    be more durable than "point pacman at whatever IP this dev machine currently has."

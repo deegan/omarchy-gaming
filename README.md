@@ -9,10 +9,15 @@ artifacts, with no `yay`/`paru` step anywhere in the chain.
 
 | Tier | Packages | What it is |
 |---|---|---|
-| 1 | `proton-ge-custom`, `wine-ge-custom`, `protonup-qt`, `heroic-games-launcher-bin`, `steamtinkerlaunch`, `goverlay` | AUR-only tools, repackaged from upstream releases |
+| 1 | `proton-ge-custom`, `proton-cachyos`, `wine-ge-custom`, `protonup-qt`, `heroic-games-launcher-bin`, `steamtinkerlaunch`, `goverlay` | AUR-only tools, repackaged from upstream releases |
 | 2 | `gamemode`+`lib32-gamemode`, `mangohud`+`lib32-mangohud` | Official Arch packages, rebuilt with opinionated tuned defaults (`/etc/gamemode.ini`, `/etc/MangoHud.conf`) |
 | 3 | `omarchy-gaming-base`, `omarchy-gaming-settings`, `omarchy-gaming-nvidia`, `omarchy-gaming-amd` | Meta-packages: one pulls in the whole stack, one ships sysctl/udev/ananicy tuning, two are GPU-vendor-specific |
 | 4 | `omarchy-kernel-gaming`(+`-headers`), `mesa`+`lib32-mesa` (and every `vulkan-*`/`opencl-mesa` driver package) | CachyOS's BORE-scheduler kernel and full Mesa driver stack, both rebuilt for an `x86-64-v3` CPU baseline instead of generic `x86-64` |
+
+`proton-ge-custom` and `proton-cachyos` are both Proton forks, not duplicates of each other:
+GE focuses on broad game-compatibility patches, while CachyOS's build focuses on performance
+(NTSYNC, tuned compiler flags) and is built for an `x86-64-v3` CPU baseline. Install whichever
+fits a given game, or both.
 
 Tiers 2 and 4 intentionally rebuild packages that already exist in the official Arch repos —
 that's the point of Tier 2/4: same package name, different build (tuned config, different
@@ -205,6 +210,8 @@ the database itself can be signed via the mechanism above.
   side-by-side fallback if something's wrong, unlike the kernel.
 - `omarchy-kernel-gaming` has been boot-tested successfully on real hardware, installed alongside a
   stock kernel.
+- `proton-cachyos` has been verified end-to-end on real hardware: installed via `pacman`, selected
+  as a game's compatibility tool in Steam, and launched successfully.
 
 ## License
 
