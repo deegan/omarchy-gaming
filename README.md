@@ -5,6 +5,21 @@ following the same sovereign build philosophy as `omarchy-pkgs`: **no AUR at run
 here is built and hosted from our own infrastructure, from source or verified upstream release
 artifacts, with no `yay`/`paru` step anywhere in the chain.
 
+## Why use this
+
+Everything you'd normally `yay -S` for a serious Linux gaming rig — Proton-GE, CachyOS's
+performance Proton, GameMode, MangoHud, a BORE-scheduler kernel, even a from-source Mesa build —
+is prebuilt, checksummed, and served from a real pacman repo instead of compiled on your machine
+from a random AUR maintainer's PKGBUILD. Point `pacman.conf` at it and `pacman -S` installs in
+seconds, not after a 30-minute Mesa compile.
+
+It's not just a mirror, though — every package carries an opinion: GameMode and MangoHud ship
+tuned defaults instead of stock config, the kernel and Mesa are rebuilt for an `x86-64-v3` CPU
+baseline instead of the generic lowest-common-denominator Arch ships, and meta-packages
+(`omarchy-gaming-base`, GPU-vendor variants) pull the whole stack in one shot. Same drop-in
+package names as official/AUR, so nothing else changes — just faster, more consistent installs,
+sitting on infrastructure you (or whoever hosts it) actually control.
+
 ## What's in here
 
 | Tier | Packages | What it is |
