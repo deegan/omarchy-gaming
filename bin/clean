@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Interactively pick superseded package versions in repo/ to delete.
+#
+# bin/build never deletes anything -- every version a package has ever had
+# stays on disk, as a rollback option for a single bad package (a Mesa or
+# kernel build that boots but breaks graphics, say) that Omarchy's own
+# whole-system snapshots don't target that precisely. That means repo/ only
+# grows, so this is how you reclaim space by hand.
+#
+# "Superseded" is decided from the published database's own %FILENAME%
+# fields (repo/*.db.tar.gz), not file mtime or a guess at version ordering
+# -- whatever the database doesn't currently point at for a package is safe
+# to remove; whatever it does is never offered.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_DIR="$ROOT/repo"
+
+if ! command -v fzf >/dev/null 2>&1; then
+    echo "error: fzf is required for the interactive picker (e.g. 'pacman -S fzf')" >&2
+    exit 1
+fi
+
+shopt -s nullglob
+db=("$REPO_DIR"/*.db.tar.gz)
+pkgs=("$REPO_DIR"/*.pkg.tar.zst)
+shopt -u nullglob
+
+if [ ${#db[@]} -eq 0 ]; then
+    echo "error: no pacman database found in $REPO_DIR -- run bin/publish first" >&2
+    exit 1
+fi
+if [ ${#pkgs[@]} -eq 0 ]; then
+    echo "No packages in $REPO_DIR."
+    exit 0
+fi
+
+extract_dir="$(mktemp -d)"
+active_file="$(mktemp)"
+trap 'rm -rf "$extract_dir" "$active_file"' EXIT
+
+tar -xzf "${db[0]}" -C "$extract_dir"
+find "$extract_dir" -name desc -exec awk '/%FILENAME%/{getline; print}' {} \; > "$active_file"
+
+superseded=()
+for f in "${pkgs[@]}"; do
+    fname="$(basename "$f")"
+    grep -qxF "$fname" "$active_file" || superseded+=("$fname")
+done
+
+if [ ${#superseded[@]} -eq 0 ]; then
+    echo "Nothing to clean up -- every file in $REPO_DIR is the currently published version."
+    exit 0
+fi
+
+mapfile -t chosen < <(
+    printf '%s\n' "${superseded[@]}" | sort | fzf --multi \
+        --header 'TAB: select  CTRL-A: select all  CTRL-D: deselect all  ENTER: confirm (empty = cancel)' \
+        --bind 'ctrl-a:select-all,ctrl-d:deselect-all' \
+        --preview "stat --format='%n%n%n%s bytes%nmodified %y' '$REPO_DIR'/{}" \
+        --preview-window 'down,5,wrap'
+)
+
+if [ ${#chosen[@]} -eq 0 ]; then
+    echo "Nothing selected, nothing removed."
+    exit 0
+fi
+
+echo "About to permanently delete:"
+total=0
+for fname in "${chosen[@]}"; do
+    size="$(stat -c%s "$REPO_DIR/$fname")"
+    total=$((total + size))
+    printf '  %-55s %10s\n' "$fname" "$(numfmt --to=iec "$size")"
+done
+printf 'Total: %s\n\n' "$(numfmt --to=iec "$total")"
+
+read -rp "Delete these ${#chosen[@]} file(s)? [y/N] " confirm
+if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+    echo "Cancelled."
+    exit 0
+fi
+
+for fname in "${chosen[@]}"; do
+    rm -f "$REPO_DIR/$fname"
+done
+echo "==> Removed ${#chosen[@]} file(s), freed $(numfmt --to=iec "$total")."

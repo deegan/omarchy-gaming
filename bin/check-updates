@@ -1,15 +1,30 @@
 #!/usr/bin/env bash
 # Report which packages have a newer upstream version than what's currently
 # in their PKGBUILD, using nvchecker (bin/nvchecker.toml) to query each
-# package's upstream source. Read-only: never edits a PKGBUILD, never builds
-# or downloads a package artifact. Bump pkgver/checksums by hand for
-# anything reported outdated, per CLAUDE.md's PKGBUILD conventions, then run
-# the `bin/build ...` line this script prints for the outdated packages.
+# package's upstream source.
+#
+# By default this is read-only: never edits a PKGBUILD, never builds or
+# downloads a package artifact. Pass --fix to have it bump pkgver/checksums
+# itself for whichever outdated packages that's safe to automate (see
+# BUMP_FN below) -- for the rest (no published checksum anywhere, or a
+# PKGBUILD that needs real judgment, not just a version swap), it still
+# just tells you and leaves the PKGBUILD alone.
 #
 # Requires `jq` on the host. Uses the host's `nvchecker` if it's in PATH,
 # otherwise runs it in a throwaway archlinux container (same pattern as
 # bin/build/bin/publish).
 set -euo pipefail
+
+fix_mode=false
+for arg in "$@"; do
+    case "$arg" in
+        --fix) fix_mode=true ;;
+        *)
+            echo "usage: $(basename "$0") [--fix]" >&2
+            exit 1
+            ;;
+    esac
+done
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_DIR="$ROOT/bin"
@@ -98,9 +113,184 @@ if [ "$exit_code" -ne 0 ]; then
     echo "See CLAUDE.md's PKGBUILD conventions for how to bump pkgver/checksums." >&2
 fi
 
-if [ "${#outdated[@]}" -gt 0 ]; then
+# --- --fix: auto-bump whatever's safe to automate --------------------------
+#
+# "Safe" means upstream publishes a checksum for the release asset we use
+# (a .sha512sum manifest file, or -- for plain GitHub release assets with no
+# such manifest -- the sha256 digest GitHub itself reports via its API for
+# every uploaded release asset), so bumping never requires downloading the
+# artifact just to hash it.
+#
+# Packages left out of BUMP_FN, and why:
+#  - goverlay/gamemode/steamtinkerlaunch: source is a GitHub-generated tag
+#    archive (archive/refs/tags/... or archive/vX.tar.gz), not an uploaded
+#    release asset -- no manifest, no API digest, nothing to fetch without
+#    downloading the tarball to hash it ourselves.
+#  - mesa/lib32-mesa: PKGBUILD is close to a verbatim copy of CachyOS's own,
+#    which can change shape (driver list, patches) between versions, not
+#    just pkgver -- a version-only bump risks silently going stale on the
+#    rest of the recipe.
+#  - omarchy-kernel-gaming: BORE patch + base .config are vendored and
+#    pinned to specific CachyOS commits, which need re-vetting against the
+#    new kernel version, not just a version swap.
+
+raw_tag_for() {
+    jq -r --arg p "$1" '.data[$p].gitref // empty' "$NEWVER_FILE" | sed 's#^refs/tags/##'
+}
+
+new_version_for() {
+    jq -r --arg p "$1" '.data[$p].version // empty' "$NEWVER_FILE"
+}
+
+set_var() {  # set_var pkgbuild varname value -- only touches "varname=..." at the start of a line
+    sed -i -E "s|^${2}=.*|${2}=${3}|" "$1"
+}
+
+set_first_sum() {  # set_first_sum pkgbuild algo newhash -- only the first entry in <algo>sums=(...)
+    sed -i -E "0,/^${2}sums=\('[^']*'/s//${2}sums=('${3}'/" "$1"
+}
+
+fetch_manifest_sha512() {
+    curl -fsSL "$1" | awk '{print $1; exit}'
+}
+
+fetch_github_sha256_digest() {  # fetch_github_sha256_digest owner/repo tag asset_filename
+    curl -fsSL "https://api.github.com/repos/$1/releases/tags/$2" \
+        | jq -r --arg name "$3" '.assets[]? | select(.name==$name) | .digest // empty' \
+        | sed 's/^sha256://'
+}
+
+bump_proton_ge_custom() {
+    local pkgdir="$PKGBUILDS_DIR/proton-ge-custom" new_pkgver tag manifest hash
+    new_pkgver="$(new_version_for proton-ge-custom)"
+    tag="$(raw_tag_for proton-ge-custom)"
+    manifest="${tag}-x86_64.sha512sum"
+    hash="$(fetch_manifest_sha512 "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/${tag}/${manifest}")"
+    [ -n "$hash" ] || return 1
+    set_var "$pkgdir/PKGBUILD" pkgver "$new_pkgver"
+    set_var "$pkgdir/PKGBUILD" pkgrel 1
+    set_first_sum "$pkgdir/PKGBUILD" sha512 "$hash"
+}
+
+bump_wine_ge_custom() {
+    local pkgdir="$PKGBUILDS_DIR/wine-ge-custom" new_pkgver tag manifest hash
+    new_pkgver="$(new_version_for wine-ge-custom)"
+    tag="$(raw_tag_for wine-ge-custom)"
+    manifest="wine-lutris-${tag}-x86_64.sha512sum"
+    hash="$(fetch_manifest_sha512 "https://github.com/GloriousEggroll/wine-ge-custom/releases/download/${tag}/${manifest}")"
+    [ -n "$hash" ] || return 1
+    set_var "$pkgdir/PKGBUILD" pkgver "$new_pkgver"
+    set_var "$pkgdir/PKGBUILD" pkgrel 1
+    set_first_sum "$pkgdir/PKGBUILD" sha512 "$hash"
+}
+
+bump_proton_cachyos() {
+    local pkgdir="$PKGBUILDS_DIR/proton-cachyos" tag new_srctag manifest hash
+    tag="$(raw_tag_for proton-cachyos)"
+    new_srctag="$(echo "$tag" | sed -E 's/^cachyos-//; s/-slr$//')"
+    manifest="proton-cachyos-${new_srctag}-slr-x86_64_v3.sha512sum"
+    hash="$(fetch_manifest_sha512 "https://github.com/CachyOS/proton-cachyos/releases/download/${tag}/${manifest}")"
+    [ -n "$hash" ] || return 1
+    set_var "$pkgdir/PKGBUILD" _srctag "$new_srctag"
+    set_var "$pkgdir/PKGBUILD" pkgrel 1
+    set_first_sum "$pkgdir/PKGBUILD" sha512 "$hash"
+}
+
+bump_protonup_qt() {
+    local pkgdir="$PKGBUILDS_DIR/protonup-qt" new_pkgver tag asset hash
+    new_pkgver="$(new_version_for protonup-qt)"
+    tag="$(raw_tag_for protonup-qt)"
+    asset="ProtonUp-Qt-${new_pkgver}-x86_64.AppImage"
+    hash="$(fetch_github_sha256_digest DavidoTek/ProtonUp-Qt "$tag" "$asset")"
+    [ -n "$hash" ] || return 1
+    set_var "$pkgdir/PKGBUILD" pkgver "$new_pkgver"
+    set_var "$pkgdir/PKGBUILD" pkgrel 1
+    set_first_sum "$pkgdir/PKGBUILD" sha256 "$hash"
+}
+
+bump_heroic_games_launcher_bin() {
+    local pkgdir="$PKGBUILDS_DIR/heroic-games-launcher-bin" new_pkgver tag asset hash
+    new_pkgver="$(new_version_for heroic-games-launcher-bin)"
+    tag="$(raw_tag_for heroic-games-launcher-bin)"
+    asset="Heroic-${new_pkgver}-linux-x64.pacman"
+    hash="$(fetch_github_sha256_digest Heroic-Games-Launcher/HeroicGamesLauncher "$tag" "$asset")"
+    [ -n "$hash" ] || return 1
+    set_var "$pkgdir/PKGBUILD" pkgver "$new_pkgver"
+    set_var "$pkgdir/PKGBUILD" pkgrel 1
+    set_first_sum "$pkgdir/PKGBUILD" sha256 "$hash"
+}
+
+bump_mangohud() {
+    local pkgdir="$PKGBUILDS_DIR/mangohud" new_pkgver tag asset hash
+    new_pkgver="$(new_version_for mangohud)"
+    tag="$(raw_tag_for mangohud)"
+    asset="MangoHud-${tag}-Source.tar.xz"
+    hash="$(fetch_github_sha256_digest flightlessmango/MangoHud "$tag" "$asset")"
+    [ -n "$hash" ] || return 1
+    set_var "$pkgdir/PKGBUILD" pkgver "$new_pkgver"
+    set_var "$pkgdir/PKGBUILD" pkgrel 1
+    set_first_sum "$pkgdir/PKGBUILD" sha256 "$hash"
+}
+
+declare -A BUMP_FN=(
+    [proton-ge-custom]=bump_proton_ge_custom
+    [wine-ge-custom]=bump_wine_ge_custom
+    [proton-cachyos]=bump_proton_cachyos
+    [protonup-qt]=bump_protonup_qt
+    [heroic-games-launcher-bin]=bump_heroic_games_launcher_bin
+    [mangohud]=bump_mangohud
+)
+
+declare -A MANUAL_REASON=(
+    [goverlay]="no published checksum upstream (tag archive, not a release asset)"
+    [gamemode]="no published checksum upstream (tag archive, not a release asset)"
+    [steamtinkerlaunch]="no published checksum upstream (tag archive, not a release asset)"
+    [mesa]="PKGBUILD may need re-syncing with CachyOS's own copy, not just a version bump"
+    [lib32-mesa]="PKGBUILD may need re-syncing with CachyOS's own copy, not just a version bump"
+    [omarchy-kernel-gaming]="vendored/pinned BORE patch needs re-vetting, not just a version bump"
+)
+
+if $fix_mode && [ "${#outdated[@]}" -gt 0 ]; then
     echo
-    echo "After bumping pkgver/checksums for the above, build just those with:"
+    echo "==> Applying automatic bumps"
+    bumped=()
+    failed=()
+    manual=()
+    for pkg in "${outdated[@]}"; do
+        if [ -n "${BUMP_FN[$pkg]:-}" ]; then
+            echo "==> Bumping $pkg"
+            if "${BUMP_FN[$pkg]}"; then
+                bumped+=("$pkg")
+            else
+                echo "  ! fetching the new checksum failed, $pkg left untouched" >&2
+                failed+=("$pkg")
+            fi
+        else
+            manual+=("$pkg")
+        fi
+    done
+
+    if [ "${#bumped[@]}" -gt 0 ]; then
+        echo
+        echo "Bumped (pkgver/checksum updated, pkgrel reset to 1): ${bumped[*]}"
+        echo "Build them with:"
+        echo "  bin/build ${bumped[*]}"
+    fi
+    if [ "${#failed[@]}" -gt 0 ]; then
+        echo
+        echo "Checksum fetch failed (left untouched, bump these by hand): ${failed[*]}"
+    fi
+    if [ "${#manual[@]}" -gt 0 ]; then
+        echo
+        echo "Needs a manual bump:"
+        for pkg in "${manual[@]}"; do
+            printf '  %-28s %s\n' "$pkg" "${MANUAL_REASON[$pkg]:-no automatic bump strategy for this package}"
+        done
+    fi
+elif [ "${#outdated[@]}" -gt 0 ]; then
+    echo
+    echo "Re-run with --fix to auto-bump whichever of these that's safe to automate,"
+    echo "or bump pkgver/checksums by hand, then build with:"
     echo "  bin/build ${outdated[*]}"
 fi
 

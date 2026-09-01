@@ -12,7 +12,8 @@ repo/ ← built .pkg.tar.zst files + pacman database (gitignored)
 bin/
 build ← build one or all packages
 publish ← run repo-add and refresh the database
-check-updates ← report which packages have a newer upstream version
+check-updates ← report/auto-bump packages with a newer upstream version (--fix)
+clean ← interactively delete superseded package versions from repo/
 nvchecker.toml ← per-package upstream version-check config, used by check-updates
 docker-compose.yml ← nginx serving ./repo on localhost:8080 for local testing
 CLAUDE.md ← this file (assistant/contributor instructions)
@@ -111,12 +112,54 @@ Meta/config-only packages (`omarchy-gaming-base`, `omarchy-gaming-settings`,
 tag doesn't mean "just bump pkgver," since the BORE patch and base `.config` are vendored
 and pinned to specific CachyOS commits and need re-vetting, not just a checksum bump.
 
-Bumping an outdated package is still manual: edit the PKGBUILD's `pkgver`
-(`_srctag`/whatever else feeds it), get the new checksum from the upstream release
-manifest/API per the convention above (never download the artifact just to hash it), reset
-`pkgrel` to 1. `bin/check-updates` prints a ready-to-run `bin/build <pkg> <pkg> ...` line
-naming just the outdated packages once it finds any — run that (then `bin/publish`) rather
-than a bare `bin/build`, which rebuilds everything regardless of what actually changed.
+### Auto-bumping with `--fix`
+
+```bash
+bin/check-updates --fix
+```
+
+edits the PKGBUILD directly (`pkgver`/`_srctag`, checksum, `pkgrel` reset to 1) for whichever
+outdated packages that's safe to automate — currently `proton-ge-custom`, `wine-ge-custom`,
+`proton-cachyos`, `protonup-qt`, `heroic-games-launcher-bin`, `mangohud`. "Safe" means
+upstream publishes a checksum for the exact release asset we use — a `.sha512sum` manifest
+file (the GE-Proton/CachyOS pattern) or, for a plain GitHub release asset with no such
+manifest, the sha256 `digest` GitHub's own API reports for every uploaded release asset — so
+bumping never means downloading the artifact just to hash it, same rule as a manual bump.
+
+The rest print an explicit reason instead of being touched:
+- `goverlay`, `gamemode`, `steamtinkerlaunch`: source is a GitHub-generated tag archive
+  (`archive/refs/tags/...`), not an uploaded release asset — no manifest, no API digest,
+  nothing to fetch without downloading the tarball to hash it ourselves.
+- `mesa`/`lib32-mesa`: the PKGBUILD is close to a verbatim copy of CachyOS's own, which can
+  change shape (driver list, patches) between versions — a version-only bump risks silently
+  going stale on the rest of the recipe.
+- `omarchy-kernel-gaming`: as above, needs the BORE patch re-vetted, not just a version swap.
+
+Whether it bumped, failed, or left something for you, `check-updates --fix` finishes by
+printing the right `bin/build <pkg> <pkg> ...` line for whatever it actually changed — run
+that (then `bin/publish`) rather than a bare `bin/build`, which rebuilds everything
+regardless of what changed. Without `--fix`, `check-updates` stays purely a read-only report
+and prints the same kind of `bin/build` line for you to run after bumping by hand.
+
+## Reclaiming disk space
+
+`bin/build` never deletes anything — every version a package has ever had stays in `repo/`.
+That's deliberate: it's a rollback option for a single bad package (a Mesa or kernel build
+that boots but breaks graphics, say) that Omarchy's own whole-system snapshots don't target
+that precisely. The tradeoff is `repo/` only grows (Proton/Mesa builds are hundreds of MB to
+1GB+ each), so use `bin/clean` to reclaim space by hand:
+
+```bash
+bin/clean
+```
+
+It's an `fzf`-driven interactive picker (needs `fzf` on the host — no Docker fallback, this
+one's meant to run at a real terminal): it cross-checks `repo/*.pkg.tar.zst` against the
+published database's own `%FILENAME%` fields (`repo/*.db.tar.gz`) — not file mtime, not a
+guess at version ordering — so whatever the database doesn't currently point at for a
+package is offered for deletion, and whatever it does is never offered. TAB to select,
+CTRL-A/CTRL-D to select/deselect all, ENTER to confirm a final size summary + y/N prompt
+before anything is actually removed.
 
 ## What NOT to do
 
@@ -209,16 +252,26 @@ Package updates (see "Updating packages" above) are now handled by `bin/check-up
 `bin/nvchecker.toml`, one `nvchecker` source entry per trackable package (GitHub
 releases/tags for Tier 1 + gamemode/mangohud, Arch's own `mesa`/`lib32-mesa` package
 version for the Mesa rebuild). Verified end-to-end against this repo's real PKGBUILDs, not
-just a dry run — it correctly reported 10 of 12 tracked packages up to date and flagged two
-real cases: `proton-ge-custom` genuinely one release behind (11.5 vs. upstream's 11.6), and
-`omarchy-kernel-gaming` behind CachyOS's newest tag (though that one's an `-rc` prerelease,
-which is exactly why that entry's comment warns it's a version-only signal, not a
-build-it-now signal). Getting nvchecker's config right took two real bugs to shake out,
-worth knowing if this ever needs touching again: nvchecker only writes the `newver` file
-if `oldver` is *also* set in `[__config__]` (both are in the config, deleted before every
-run, since `bin/check-updates` does its own comparison against each PKGBUILD rather than
-trusting nvchecker's own old/new diffing); and the JSON it writes is nested as
-`{"data": {name: {"version": ...}}}`, not a flat `{name: version}` map.
+just a dry run — it correctly flagged `proton-ge-custom` genuinely one release behind (11.5
+vs. upstream's 11.6, since bumped and built) and `omarchy-kernel-gaming` behind CachyOS's
+newest tag (though that one's an `-rc` prerelease, which is exactly why that entry's comment
+warns it's a version-only signal, not a build-it-now signal). Getting nvchecker's config
+right took two real bugs to shake out, worth knowing if this ever needs touching again:
+nvchecker only writes the `newver` file if `oldver` is *also* set in `[__config__]` (both
+are in the config, deleted before every run, since `bin/check-updates` does its own
+comparison against each PKGBUILD rather than trusting nvchecker's own old/new diffing); and
+the JSON it writes is nested as `{"data": {name: {"version": ...}}}`, not a flat
+`{name: version}` map.
+
+`bin/build` no longer deletes superseded package versions (see "Reclaiming disk space"
+above) — `bin/clean` handles that now, interactively, via `fzf`. And `bin/check-updates
+--fix` (see "Auto-bumping with `--fix`" above) auto-edits the PKGBUILD for 6 of the 9
+version-tracked packages; verified correct by deliberately corrupting each of those 6
+PKGBUILDs' `pkgver`/checksum to garbage values, running `--fix`, and diffing the result
+against git — zero diff every time, i.e. it reconstructed the exact already-known-correct
+values from upstream's own published checksums/digests, not just "didn't crash." Building
+what it bumps is still a separate, explicit `bin/build <pkg>...` step (the line
+`check-updates --fix` prints) — it does not chain into a build itself.
 
 ## Next steps
 
@@ -233,5 +286,5 @@ launched a game via Steam). What's left:
 2. Longer-term: the repo is still unsigned (see above) and the host's LAN IP is DHCP-
    assigned, not static — both fine for now, both worth revisiting if this setup needs to
    be more durable than "point pacman at whatever IP this dev machine currently has."
-3. `bin/check-updates` currently reports `proton-ge-custom` one release behind (11.5 vs.
-   upstream's 11.6) — a real, actionable update, not just a demo of the tool.
+3. `omarchy-kernel-gaming` is currently behind CachyOS's newest tag, but that tag is an
+   `-rc` prerelease — worth another look once CachyOS cuts a real release, not before.

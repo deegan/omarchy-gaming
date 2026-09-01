@@ -101,11 +101,15 @@ On the machine you want to install packages on, edit `/etc/pacman.conf`:
   nix-shell -p pacman --run "bin/publish"
   ```
 - A few GB of disk for the published packages (currently ~1.5GB; grows if you rebuild Tier 4 with
-  debug packages included)
+  debug packages included) — and keeps growing over time, since `bin/build` never deletes a
+  superseded version on its own; see [Reclaiming disk space](#reclaiming-disk-space)
 - (Optional) `jq` and, ideally, `nvchecker` in `PATH` if you want to run `bin/check-updates` — see
   [Updating packages](#updating-packages). `nvchecker` falls back to a throwaway `archlinux`
   container the same way `bin/publish` does for `repo-add`; `jq` doesn't, so it's the one hard
   requirement for that script specifically.
+- (Optional) `fzf` in `PATH` if you want to run `bin/clean` — see
+  [Reclaiming disk space](#reclaiming-disk-space). No Docker fallback for this one; it's meant to
+  run interactively at a real terminal.
 - If building from source rather than copying pre-built packages: expect the Tier 4 builds (kernel,
   Mesa) to take 30 minutes to a few hours combined, even on a many-core machine — see
   [Building packages](#building-packages)
@@ -218,23 +222,55 @@ whether it's the latest upstream version.
 bin/check-updates
 ```
 
-reports which packages are behind. It's read-only — it never edits a PKGBUILD, downloads a
-package artifact, or builds anything — and exits non-zero if any package is outdated or a
-check failed. Under the hood it uses [nvchecker](https://github.com/lilydjwg/nvchecker)
-(config: `bin/nvchecker.toml`) to fetch each package's latest upstream version — GitHub
-releases/tags for the Tier 1 repacks plus `gamemode`/`mangohud`, Arch's own `mesa` package
-version for the Mesa rebuild — and compares it against each PKGBUILD's current `pkgver`.
-Meta/config-only packages (`omarchy-gaming-base` and friends) have no upstream and aren't
-tracked. `omarchy-kernel-gaming`'s entry is version-only: a newer CachyOS tag doesn't mean
-"just bump pkgver," since the BORE patch and base `.config` are vendored and pinned to
-specific CachyOS commits.
+reports which packages are behind. By default it's read-only — it never edits a PKGBUILD,
+downloads a package artifact, or builds anything — and exits non-zero if any package is
+outdated or a check failed. Under the hood it uses
+[nvchecker](https://github.com/lilydjwg/nvchecker) (config: `bin/nvchecker.toml`) to fetch
+each package's latest upstream version — GitHub releases/tags for the Tier 1 repacks plus
+`gamemode`/`mangohud`, Arch's own `mesa` package version for the Mesa rebuild — and compares
+it against each PKGBUILD's current `pkgver`. Meta/config-only packages
+(`omarchy-gaming-base` and friends) have no upstream and aren't tracked.
+`omarchy-kernel-gaming`'s entry is version-only: a newer CachyOS tag doesn't mean "just bump
+pkgver," since the BORE patch and base `.config` are vendored and pinned to specific CachyOS
+commits.
 
-Bumping a flagged package is manual: edit its PKGBUILD's `pkgver` (and whatever feeds it,
-e.g. `_srctag`), get the new checksum from the upstream release manifest/API rather than
-downloading the artifact just to hash it, and reset `pkgrel` to `1`. When it finds any
-outdated packages, `bin/check-updates` also prints a `bin/build <name> <name> ...` line
-naming just those — use that (then `bin/publish`) instead of a bare `bin/build`, which
-rebuilds every package regardless of whether it changed.
+```bash
+bin/check-updates --fix
+```
+
+edits the PKGBUILD directly for whichever outdated packages that's safe to automate —
+currently `proton-ge-custom`, `wine-ge-custom`, `proton-cachyos`, `protonup-qt`,
+`heroic-games-launcher-bin`, `mangohud`, wherever upstream publishes a checksum for the
+release asset we use (a `.sha512sum` manifest, or the sha256 digest GitHub's API reports for
+every uploaded release asset) so bumping never means downloading the artifact just to hash
+it. `goverlay`/`gamemode`/`steamtinkerlaunch` (no published checksum at all) and
+`mesa`/`lib32-mesa`/`omarchy-kernel-gaming` (need real judgment, not just a version swap)
+print a reason instead of being touched. Either way, it finishes by printing the right
+`bin/build <name> <name> ...` line for what it actually changed — use that (then
+`bin/publish`) instead of a bare `bin/build`, which rebuilds every package regardless of
+whether it changed. Bumping something outside that list is manual: edit its PKGBUILD's
+`pkgver` (and whatever feeds it, e.g. `_srctag`), get the new checksum from the upstream
+release manifest/API rather than downloading the artifact just to hash it, and reset
+`pkgrel` to `1`.
+
+## Reclaiming disk space
+
+`bin/build` never deletes a package's older versions — every one it has ever built for a
+given package stays in `repo/`. That's deliberate: it's a rollback option for a single bad
+package (a Mesa or kernel build that boots but breaks graphics, say) that's more targeted
+than Omarchy's whole-system snapshots. The tradeoff is `repo/` only grows (Proton/Mesa builds
+are hundreds of MB to 1GB+ each), so reclaim space with:
+
+```bash
+bin/clean
+```
+
+an [fzf](https://github.com/junegunn/fzf)-driven interactive picker. It cross-checks
+`repo/*.pkg.tar.zst` against the published database's own record of which file is current
+for each package — not file age, not a guess at version ordering — so whatever the database
+doesn't currently point at is offered for deletion, and whatever it does is never offered.
+`TAB` to select, `CTRL-A`/`CTRL-D` to select/deselect everything, `ENTER` to confirm; nothing
+is removed until you also confirm a final size summary.
 
 ## Troubleshooting
 
