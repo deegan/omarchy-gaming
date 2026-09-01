@@ -1,5 +1,9 @@
 /repo/
 
+# nvchecker's fetched-versions cache, written by bin/check-updates
+/bin/.nvchecker-newver.json
+/bin/.nvchecker-oldver.json
+
 # makepkg build/source artifacts left in pkgbuilds/*/
 pkgbuilds/*/src/
 pkgbuilds/*/pkg/

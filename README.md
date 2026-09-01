@@ -102,6 +102,10 @@ On the machine you want to install packages on, edit `/etc/pacman.conf`:
   ```
 - A few GB of disk for the published packages (currently ~1.5GB; grows if you rebuild Tier 4 with
   debug packages included)
+- (Optional) `jq` and, ideally, `nvchecker` in `PATH` if you want to run `bin/check-updates` — see
+  [Updating packages](#updating-packages). `nvchecker` falls back to a throwaway `archlinux`
+  container the same way `bin/publish` does for `repo-add`; `jq` doesn't, so it's the one hard
+  requirement for that script specifically.
 - If building from source rather than copying pre-built packages: expect the Tier 4 builds (kernel,
   Mesa) to take 30 minutes to a few hours combined, even on a many-core machine — see
   [Building packages](#building-packages)
@@ -203,6 +207,32 @@ the database itself can be signed via the mechanism above.
 - Packages that already exist unchanged in the official Arch repos don't belong here — only add one
   if it's patched, recompiled with different flags, or bundles opinionated config on top.
 - Nothing under `repo/` is committed — it's build output, not source.
+
+## Updating packages
+
+Every `pkgver` in this repo is a hardcoded literal — nothing here fetches upstream
+automatically, and `bin/build` only ever builds whatever's already on disk, regardless of
+whether it's the latest upstream version.
+
+```bash
+bin/check-updates
+```
+
+reports which packages are behind. It's read-only — it never edits a PKGBUILD, downloads a
+package artifact, or builds anything — and exits non-zero if any package is outdated or a
+check failed. Under the hood it uses [nvchecker](https://github.com/lilydjwg/nvchecker)
+(config: `bin/nvchecker.toml`) to fetch each package's latest upstream version — GitHub
+releases/tags for the Tier 1 repacks plus `gamemode`/`mangohud`, Arch's own `mesa` package
+version for the Mesa rebuild — and compares it against each PKGBUILD's current `pkgver`.
+Meta/config-only packages (`omarchy-gaming-base` and friends) have no upstream and aren't
+tracked. `omarchy-kernel-gaming`'s entry is version-only: a newer CachyOS tag doesn't mean
+"just bump pkgver," since the BORE patch and base `.config` are vendored and pinned to
+specific CachyOS commits.
+
+Bumping a flagged package is manual: edit its PKGBUILD's `pkgver` (and whatever feeds it,
+e.g. `_srctag`), get the new checksum from the upstream release manifest/API rather than
+downloading the artifact just to hash it, reset `pkgrel` to `1`, then `bin/build <name>` and
+`bin/publish`.
 
 ## Troubleshooting
 

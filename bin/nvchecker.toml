@@ -1,0 +1,107 @@
+# Per-package "what's the latest upstream version" checks, used by
+# bin/check-updates. One [section] per pkgbuilds/<name>/ directory that has
+# a trackable upstream — meta/config-only packages (omarchy-gaming-base,
+# omarchy-gaming-settings, omarchy-gaming-nvidia, omarchy-gaming-amd) are
+# intentionally absent, since they have no upstream version to track.
+#
+# `prefix`, `from_pattern`/`to_pattern` reshape the raw upstream tag/release
+# name into the same string this repo's PKGBUILD uses as $pkgver, so
+# bin/check-updates can compare them directly. See nvchecker's docs
+# (https://nvchecker.readthedocs.io/) for the full source/option reference.
+
+[__config__]
+# nvchecker only writes `newver` when `oldver` is also set. bin/check-updates
+# deletes both before every run and does its own comparison against each
+# PKGBUILD's pkgver, so neither is meant to persist state between runs.
+oldver = ".nvchecker-oldver.json"
+newver = ".nvchecker-newver.json"
+
+# --- Tier 1: AUR-only, binary repacks ---
+
+[proton-ge-custom]
+source = "github"
+github = "GloriousEggroll/proton-ge-custom"
+use_latest_release = true
+prefix = "GE-Proton"
+from_pattern = "-"
+to_pattern = "."
+
+[wine-ge-custom]
+source = "github"
+github = "GloriousEggroll/wine-ge-custom"
+use_latest_release = true
+prefix = "GE-Proton"
+from_pattern = "-"
+to_pattern = "."
+
+[proton-cachyos]
+source = "github"
+github = "CachyOS/proton-cachyos"
+use_latest_release = true
+# e.g. release tag "cachyos-11.0-20260703-slr" -> "11.0.20260703", matching
+# this PKGBUILD's pkgver=${_srctag//-/.}
+from_pattern = "^cachyos-([0-9]+\\.[0-9]+)-([0-9]{8})-slr$"
+to_pattern = "\\1.\\2"
+
+[protonup-qt]
+source = "github"
+github = "DavidoTek/ProtonUp-Qt"
+use_latest_release = true
+prefix = "v"
+
+[heroic-games-launcher-bin]
+source = "github"
+github = "Heroic-Games-Launcher/HeroicGamesLauncher"
+use_latest_release = true
+prefix = "v"
+
+[steamtinkerlaunch]
+source = "github"
+github = "sonic2kk/steamtinkerlaunch"
+use_max_tag = true
+prefix = "v"
+
+[goverlay]
+source = "github"
+github = "benjamimgois/goverlay"
+use_max_tag = true
+
+# --- Tier 2: Arch official, repackaged with tuning ---
+
+[gamemode]
+source = "github"
+github = "FeralInteractive/gamemode"
+use_max_tag = true
+
+[mangohud]
+source = "github"
+github = "flightlessmango/MangoHud"
+use_latest_release = true
+prefix = "v"
+
+# Tracked against upstream Arch's own package version, since CachyOS's Mesa
+# PKGBUILD (which ours is based on) tracks the same upstream Arch releases.
+[mesa]
+source = "archpkg"
+archpkg = "mesa"
+strip_release = true
+
+[lib32-mesa]
+source = "archpkg"
+archpkg = "lib32-mesa"
+strip_release = true
+
+# --- Tier 4 ---
+
+# Version-only signal. A new CachyOS kernel tag does NOT mean "just bump
+# pkgver" -- the BORE patch and base .config are vendored and pinned to
+# specific CachyOS commits (see pkgbuilds/omarchy-kernel-gaming/PKGBUILD's
+# header), so an update here needs re-vendoring those, not just a checksum
+# bump. bin/check-updates compares this against "$pkgver-$_tagrel", since
+# pkgver alone (major.minor kernel version) doesn't capture CachyOS's own
+# release counter.
+[omarchy-kernel-gaming]
+source = "github"
+github = "CachyOS/linux"
+use_latest_release = true
+prefix = "cachyos-"

@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Report which packages have a newer upstream version than what's currently
+# in their PKGBUILD, using nvchecker (bin/nvchecker.toml) to query each
+# package's upstream source. Read-only: never edits a PKGBUILD, never builds
+# or downloads a package artifact. Bump pkgver/checksums by hand for
+# anything reported outdated, per CLAUDE.md's PKGBUILD conventions, then
+# `bin/build <pkg>`.
+#
+# Requires `jq` on the host. Uses the host's `nvchecker` if it's in PATH,
+# otherwise runs it in a throwaway archlinux container (same pattern as
+# bin/build/bin/publish).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BIN_DIR="$ROOT/bin"
+PKGBUILDS_DIR="$ROOT/pkgbuilds"
+CONFIG="$BIN_DIR/nvchecker.toml"
+NEWVER_FILE="$BIN_DIR/.nvchecker-newver.json"
+OLDVER_FILE="$BIN_DIR/.nvchecker-oldver.json"
+BUILD_IMAGE="archlinux:latest"
+
+if ! command -v jq >/dev/null 2>&1; then
+    echo "error: jq is required on the host to run this script" >&2
+    exit 1
+fi
+
+rm -f "$NEWVER_FILE" "$OLDVER_FILE"
+
+if command -v nvchecker >/dev/null 2>&1; then
+    nvchecker -c "$CONFIG"
+else
+    echo "==> nvchecker not found on host, running it in a throwaway archlinux container" >&2
+    docker run --rm \
+        -v "$BIN_DIR":/bin-mount \
+        -w /bin-mount \
+        "$BUILD_IMAGE" \
+        bash -c '
+            set -e
+            pacman -Sy --noconfirm --needed nvchecker
+            nvchecker -c nvchecker.toml
+        '
+fi
+
+if [ ! -f "$NEWVER_FILE" ]; then
+    echo "error: nvchecker produced no output ($NEWVER_FILE missing)" >&2
+    exit 1
+fi
+
+# Most packages compare directly against $pkgver. omarchy-kernel-gaming's
+# pkgver doesn't include CachyOS's own release counter (_tagrel), so it
+# needs a slightly different comparison string -- see the comment in
+# bin/nvchecker.toml.
+current_version() {
+    local pkg="$1" pkgdir="$2"
+    (
+        set +eu
+        source "$pkgdir/PKGBUILD" >/dev/null 2>&1
+        if [ "$pkg" = "omarchy-kernel-gaming" ]; then
+            echo "${pkgver}-${_tagrel}"
+        else
+            echo "$pkgver"
+        fi
+    ) 2>/dev/null
+}
+
+printf '%-28s %-20s %-20s %s\n' "PACKAGE" "CURRENT" "UPSTREAM" "STATUS"
+
+exit_code=0
+while IFS= read -r pkg; do
+    pkgdir="$PKGBUILDS_DIR/$pkg"
+    if [ ! -f "$pkgdir/PKGBUILD" ]; then
+        printf '%-28s %-20s %-20s %s\n' "$pkg" "-" "-" "no matching pkgbuilds/ dir"
+        exit_code=1
+        continue
+    fi
+
+    upstream="$(jq -r --arg p "$pkg" '.data[$p].version // empty' "$NEWVER_FILE")"
+    current="$(current_version "$pkg" "$pkgdir")" || current=""
+    [ -n "$current" ] || current="?"
+
+    if [ -z "$upstream" ]; then
+        status="check failed"
+        exit_code=1
+    elif [ "$upstream" = "$current" ]; then
+        status="up to date"
+    else
+        status="UPDATE AVAILABLE"
+        exit_code=1
+    fi
+
+    printf '%-28s %-20s %-20s %s\n' "$pkg" "$current" "${upstream:--}" "$status"
+done < <(grep -oP '^\[\K[a-zA-Z0-9_.-]+(?=\])' "$CONFIG" | grep -v '^__config__$')
+
+if [ "$exit_code" -ne 0 ]; then
+    echo
+    echo "See CLAUDE.md's PKGBUILD conventions for how to bump pkgver/checksums." >&2
+fi
+
+exit "$exit_code"

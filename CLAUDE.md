@@ -12,6 +12,8 @@ repo/ ← built .pkg.tar.zst files + pacman database (gitignored)
 bin/
 build ← build one or all packages
 publish ← run repo-add and refresh the database
+check-updates ← report which packages have a newer upstream version
+nvchecker.toml ← per-package upstream version-check config, used by check-updates
 docker-compose.yml ← nginx serving ./repo on localhost:8080 for local testing
 CLAUDE.md ← this file (assistant/contributor instructions)
 README.md ← user-facing guide: using the repo, hosting your own instance, signing, troubleshooting
@@ -78,6 +80,41 @@ bin/publish
 pacman -Sy
 pacman -S proton-ge-custom
 ```
+
+## Updating packages
+
+Nothing here fetches upstream automatically — every `pkgver` is a hardcoded literal in its
+PKGBUILD, and `bin/build` only ever builds whatever's already on disk. It never checks
+whether that's the latest upstream version, so there's no "wasted build" risk from staying
+still — the risk runs the other way: silently drifting behind upstream with nothing telling
+you.
+
+`bin/check-updates` closes that gap as a read-only report, not a fourth build step:
+
+```bash
+bin/check-updates
+```
+
+It uses `nvchecker` (`bin/nvchecker.toml`, one `[section]` per trackable package — GitHub
+releases/tags for the Tier 1 binary repacks and gamemode/mangohud, Arch's own `mesa`
+package version for the Mesa rebuild) to fetch each package's latest upstream version and
+prints a table comparing it against the current `pkgver` in each PKGBUILD. It never edits a
+PKGBUILD, never downloads a package artifact, and never builds anything — it exits non-zero
+if anything is outdated or a check failed, so it's safe to script around. Uses the host's
+`nvchecker` if present, otherwise runs it in a throwaway `archlinux` container the same way
+`bin/build`/`bin/publish` fall back to Docker (nvchecker is an official `extra` package, not
+AUR). Also needs `jq` on the host to parse its output.
+
+Meta/config-only packages (`omarchy-gaming-base`, `omarchy-gaming-settings`,
+`omarchy-gaming-nvidia`, `omarchy-gaming-amd`) have no upstream and aren't in
+`nvchecker.toml`. `omarchy-kernel-gaming`'s entry is a version-only signal — a newer CachyOS
+tag doesn't mean "just bump pkgver," since the BORE patch and base `.config` are vendored
+and pinned to specific CachyOS commits and need re-vetting, not just a checksum bump.
+
+Bumping an outdated package is still manual: edit the PKGBUILD's `pkgver`
+(`_srctag`/whatever else feeds it), get the new checksum from the upstream release
+manifest/API per the convention above (never download the artifact just to hash it), reset
+`pkgrel` to 1, then `bin/build <pkg>` and `bin/publish`.
 
 ## What NOT to do
 
@@ -166,6 +203,21 @@ hasn't been tested on real hardware yet; the user's plan is to lean on Omarchy's
 snapshot/rollback system as the safety net for that test, rather than this repo adding
 its own (e.g. keeping the old package cached for a `pacman -U` downgrade).
 
+Package updates (see "Updating packages" above) are now handled by `bin/check-updates` +
+`bin/nvchecker.toml`, one `nvchecker` source entry per trackable package (GitHub
+releases/tags for Tier 1 + gamemode/mangohud, Arch's own `mesa`/`lib32-mesa` package
+version for the Mesa rebuild). Verified end-to-end against this repo's real PKGBUILDs, not
+just a dry run — it correctly reported 10 of 12 tracked packages up to date and flagged two
+real cases: `proton-ge-custom` genuinely one release behind (11.5 vs. upstream's 11.6), and
+`omarchy-kernel-gaming` behind CachyOS's newest tag (though that one's an `-rc` prerelease,
+which is exactly why that entry's comment warns it's a version-only signal, not a
+build-it-now signal). Getting nvchecker's config right took two real bugs to shake out,
+worth knowing if this ever needs touching again: nvchecker only writes the `newver` file
+if `oldver` is *also* set in `[__config__]` (both are in the config, deleted before every
+run, since `bin/check-updates` does its own comparison against each PKGBUILD rather than
+trusting nvchecker's own old/new diffing); and the JSON it writes is nested as
+`{"data": {name: {"version": ...}}}`, not a flat `{name: version}` map.
+
 ## Next steps
 
 All items in the original tier list (Tiers 1-4) are now built, published, and verified as
@@ -179,3 +231,5 @@ launched a game via Steam). What's left:
 2. Longer-term: the repo is still unsigned (see above) and the host's LAN IP is DHCP-
    assigned, not static — both fine for now, both worth revisiting if this setup needs to
    be more durable than "point pacman at whatever IP this dev machine currently has."
+3. `bin/check-updates` currently reports `proton-ge-custom` one release behind (11.5 vs.
+   upstream's 11.6) — a real, actionable update, not just a demo of the tool.
