@@ -114,7 +114,9 @@ and pinned to specific CachyOS commits and need re-vetting, not just a checksum 
 Bumping an outdated package is still manual: edit the PKGBUILD's `pkgver`
 (`_srctag`/whatever else feeds it), get the new checksum from the upstream release
 manifest/API per the convention above (never download the artifact just to hash it), reset
-`pkgrel` to 1, then `bin/build <pkg>` and `bin/publish`.
+`pkgrel` to 1. `bin/check-updates` prints a ready-to-run `bin/build <pkg> <pkg> ...` line
+naming just the outdated packages once it finds any — run that (then `bin/publish`) rather
+than a bare `bin/build`, which rebuilds everything regardless of what actually changed.
 
 ## What NOT to do
 

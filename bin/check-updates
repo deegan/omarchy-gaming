@@ -3,8 +3,8 @@
 # in their PKGBUILD, using nvchecker (bin/nvchecker.toml) to query each
 # package's upstream source. Read-only: never edits a PKGBUILD, never builds
 # or downloads a package artifact. Bump pkgver/checksums by hand for
-# anything reported outdated, per CLAUDE.md's PKGBUILD conventions, then
-# `bin/build <pkg>`.
+# anything reported outdated, per CLAUDE.md's PKGBUILD conventions, then run
+# the `bin/build ...` line this script prints for the outdated packages.
 #
 # Requires `jq` on the host. Uses the host's `nvchecker` if it's in PATH,
 # otherwise runs it in a throwaway archlinux container (same pattern as
@@ -66,6 +66,7 @@ current_version() {
 printf '%-28s %-20s %-20s %s\n' "PACKAGE" "CURRENT" "UPSTREAM" "STATUS"
 
 exit_code=0
+outdated=()
 while IFS= read -r pkg; do
     pkgdir="$PKGBUILDS_DIR/$pkg"
     if [ ! -f "$pkgdir/PKGBUILD" ]; then
@@ -86,6 +87,7 @@ while IFS= read -r pkg; do
     else
         status="UPDATE AVAILABLE"
         exit_code=1
+        outdated+=("$pkg")
     fi
 
     printf '%-28s %-20s %-20s %s\n' "$pkg" "$current" "${upstream:--}" "$status"
@@ -94,6 +96,12 @@ done < <(grep -oP '^\[\K[a-zA-Z0-9_.-]+(?=\])' "$CONFIG" | grep -v '^__config__$
 if [ "$exit_code" -ne 0 ]; then
     echo
     echo "See CLAUDE.md's PKGBUILD conventions for how to bump pkgver/checksums." >&2
+fi
+
+if [ "${#outdated[@]}" -gt 0 ]; then
+    echo
+    echo "After bumping pkgver/checksums for the above, build just those with:"
+    echo "  bin/build ${outdated[*]}"
 fi
 
 exit "$exit_code"

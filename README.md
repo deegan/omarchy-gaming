@@ -231,8 +231,10 @@ specific CachyOS commits.
 
 Bumping a flagged package is manual: edit its PKGBUILD's `pkgver` (and whatever feeds it,
 e.g. `_srctag`), get the new checksum from the upstream release manifest/API rather than
-downloading the artifact just to hash it, reset `pkgrel` to `1`, then `bin/build <name>` and
-`bin/publish`.
+downloading the artifact just to hash it, and reset `pkgrel` to `1`. When it finds any
+outdated packages, `bin/check-updates` also prints a `bin/build <name> <name> ...` line
+naming just those — use that (then `bin/publish`) instead of a bare `bin/build`, which
+rebuilds every package regardless of whether it changed.
 
 ## Troubleshooting
 
