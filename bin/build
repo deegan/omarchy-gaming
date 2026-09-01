@@ -10,6 +10,16 @@ BUILD_IMAGE="archlinux:latest"
 
 mkdir -p "$REPO_DIR"
 
+# Extract the package name from a built artifact's filename
+# (NAME-PKGVER-PKGREL-ARCH.pkg.tar.zst -> NAME), stripping the trailing
+# three dash-separated fields positionally. Relies on PKGREL and ARCH never
+# containing a dash (always true: PKGREL is a plain integer, ARCH is
+# x86_64/any/...) and, for every PKGBUILD in this repo, PKGVER not
+# containing one either -- NAME itself may (e.g. lib32-gamemode).
+pkgfile_name() {
+    echo "$1" | sed -E 's/-[^-]+-[^-]+\.pkg\.tar\.zst$//; s/-[^-]+$//'
+}
+
 build_one() {
     local pkg="$1"
     local pkgdir="$PKGBUILDS_DIR/$pkg"
@@ -52,20 +62,54 @@ build_one() {
         return 1
     fi
 
+    local new_names=()
+    for artifact in "${artifacts[@]}"; do
+        new_names+=("$(pkgfile_name "$(basename "$artifact")")")
+    done
+
     mv -f "${artifacts[@]}" "$REPO_DIR/"
     rm -rf "$pkgdir/src" "$pkgdir/pkg"
     rm -f "$pkgdir"/*.log
+
+    # Remove any previously-published version of the package(s) we just
+    # built, so repo/ doesn't silently accumulate superseded artifacts
+    # (Proton/Mesa builds run 100s of MB-1GB+ each) on every version bump.
+    # repo-add only ever updates a pkgname's *database entry* to the newest
+    # version -- it never deletes the old .pkg.tar.zst file, so this has to
+    # happen here. Matched by exact package name (extracted the same way
+    # makepkg names files: NAME-PKGVER-PKGREL-ARCH.pkg.tar.zst, right-to-left
+    # so a dash-containing NAME like lib32-gamemode still works), not a
+    # prefix glob -- a glob would also sweep up unrelated same-prefixed
+    # packages, e.g. "mesa-*" matching "mesa-debug"/"mesa-docs".
+    shopt -s nullglob
+    local existing=("$REPO_DIR"/*.pkg.tar.zst)
+    shopt -u nullglob
+    local f fname is_new name
+    for f in "${existing[@]}"; do
+        fname="$(basename "$f")"
+        is_new=false
+        for artifact in "${artifacts[@]}"; do
+            [ "$fname" = "$(basename "$artifact")" ] && is_new=true && break
+        done
+        $is_new && continue
+
+        for name in "${new_names[@]}"; do
+            if [ "$(pkgfile_name "$fname")" = "$name" ]; then
+                echo "==> Removing stale $fname"
+                rm -f "$f"
+                break
+            fi
+        done
+    done
 
     echo "==> Built $pkg -> $REPO_DIR"
 
     # Republish immediately so later packages in the same run (or a later
     # `bin/build` invocation) can resolve dependencies on whatever we just
     # built, e.g. omarchy-gaming-base depending on mesa/gamemode/mangohud.
-    if command -v repo-add >/dev/null 2>&1; then
-        "$ROOT/bin/publish" >/dev/null
-    else
-        echo "warning: repo-add not found on host, skipping auto-publish; run bin/publish manually" >&2
-    fi
+    # bin/publish handles its own host-repo-add-vs-Docker fallback, so just
+    # call it unconditionally rather than re-checking for repo-add here.
+    "$ROOT/bin/publish" >/dev/null
 }
 
 # Packages that depend on other packages built in this same repo must come
