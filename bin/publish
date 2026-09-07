@@ -23,10 +23,42 @@ if [ ${#pkgs[@]} -eq 0 ]; then
     exit 1
 fi
 
-pkg_names=()
+all_names=()
 for pkg in "${pkgs[@]}"; do
-    pkg_names+=("$(basename "$pkg")")
+    all_names+=("$(basename "$pkg")")
 done
+
+# Filters a list of *.pkg.tar.zst basenames down to just the single highest
+# version present for each package name, using pacman's own `vercmp`.
+#
+# bin/build intentionally leaves every version a package has ever had in
+# repo/ (see CLAUDE.md "Reclaiming disk space") as a rollback option. But
+# repo-add doesn't compare versions across the files given to it in one
+# invocation -- it keeps whichever one it processes *last*, which for two
+# files sharing a pkgname depends on argument order, not actual version.
+# Handed the glob's alphabetical order, an old version can sort after a
+# newer one (e.g. "7.10.0" < "7.2.1" alphabetically) and silently win,
+# regressing the published database back to a superseded build even though
+# the new file is right there on disk. So: never give repo-add more than
+# one version of the same package in a single call.
+dedupe_latest() {
+    local fname name ver
+    declare -A latest_file latest_ver
+    for fname in "$@"; do
+        # NAME-[EPOCH:]PKGVER-PKGREL-ARCH.pkg.tar.zst -- PKGVER can't
+        # contain a dash (an Arch packaging rule), PKGREL is a plain
+        # integer, and ARCH is x86_64/any/..., so none of those three ever
+        # contain a dash themselves, and stripping them right-to-left is
+        # unambiguous even for a dash-containing NAME like lib32-gamemode.
+        name="$(echo "$fname" | sed -E 's/-[^-]+-[^-]+\.pkg\.tar\.zst$//; s/-[^-]+$//')"
+        ver="$(echo "${fname#"$name"-}" | sed -E 's/-[^-]+\.pkg\.tar\.zst$//')"
+        if [ -z "${latest_ver[$name]:-}" ] || [ "$(vercmp "$ver" "${latest_ver[$name]}")" -gt 0 ]; then
+            latest_ver[$name]="$ver"
+            latest_file[$name]="$fname"
+        fi
+    done
+    printf '%s\n' "${latest_file[@]}" | sort
+}
 
 sign_args=()
 if [ -n "${GPG_KEY_ID:-}" ]; then
@@ -36,6 +68,7 @@ else
 fi
 
 if command -v repo-add >/dev/null 2>&1; then
+    mapfile -t pkg_names < <(dedupe_latest "${all_names[@]}")
     cd "$REPO_DIR"
     repo-add "${sign_args[@]}" "$REPO_NAME.db.tar.gz" "${pkg_names[@]}"
 else
@@ -53,7 +86,13 @@ else
         fi
     fi
 
+    # vercmp ships with pacman itself (already in the base image), so the
+    # dedupe can run in here even though pacman-contrib (for repo-add) still
+    # needs installing. sign_args/DB_NAME travel via env instead of mixing
+    # into "$@" -- dedupe_latest needs "$@" to be package filenames only.
     docker run --rm \
+        -e SIGN_ARGS="${sign_args[*]}" \
+        -e DB_NAME="$REPO_NAME.db.tar.gz" \
         -v "$REPO_DIR":/repo \
         "${gpg_mount[@]}" \
         -w /repo \
@@ -61,8 +100,26 @@ else
         bash -c '
             set -e
             pacman -Sy --noconfirm --needed pacman-contrib gnupg
-            repo-add "$@"
-        ' _ "${sign_args[@]}" "$REPO_NAME.db.tar.gz" "${pkg_names[@]}"
+
+            dedupe_latest() {
+                local fname name ver
+                declare -A latest_file latest_ver
+                for fname in "$@"; do
+                    name="$(echo "$fname" | sed -E "s/-[^-]+-[^-]+\.pkg\.tar\.zst\$//; s/-[^-]+\$//")"
+                    ver="$(echo "${fname#"$name"-}" | sed -E "s/-[^-]+\.pkg\.tar\.zst\$//")"
+                    if [ -z "${latest_ver[$name]:-}" ] || [ "$(vercmp "$ver" "${latest_ver[$name]}")" -gt 0 ]; then
+                        latest_ver[$name]="$ver"
+                        latest_file[$name]="$fname"
+                    fi
+                done
+                printf "%s\n" "${latest_file[@]}" | sort
+            }
+
+            mapfile -t pkg_names < <(dedupe_latest "$@")
+            # shellcheck disable=SC2206 -- SIGN_ARGS is either empty or "-s -k KEYID", safe to word-split
+            sign_args=($SIGN_ARGS)
+            repo-add "${sign_args[@]}" "$DB_NAME" "${pkg_names[@]}"
+        ' _ "${all_names[@]}"
 fi
 
-echo "==> Published ${#pkgs[@]} package(s) to $REPO_NAME.db.tar.gz"
+echo "==> Published latest-version database to $REPO_NAME.db.tar.gz (${#all_names[@]} package file(s) on disk in $REPO_DIR, including any superseded rollback versions)"
