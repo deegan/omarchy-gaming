@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Regenerate the pacman database in repo/ from whatever packages are there.
+# Regenerate the pacman database in repo/ from whatever packages are there,
+# and the repo/index.html landing page nginx serves alongside it.
 # Set GPG_KEY_ID to sign the database (packages are expected to already be
 # signed at build time with the same key).
 #
@@ -58,6 +59,343 @@ dedupe_latest() {
         fi
     done
     printf '%s\n' "${latest_file[@]}" | sort
+}
+
+# Same NAME-[EPOCH:]PKGVER-PKGREL-ARCH.pkg.tar.zst split dedupe_latest()
+# uses, isolated here so generate_index() (which runs on the host regardless
+# of which repo-add path was taken above) doesn't have to duplicate it.
+pkg_name_from_filename() {
+    local fname="$1"
+    echo "$fname" | sed -E 's/-[^-]+-[^-]+\.pkg\.tar\.zst$//; s/-[^-]+$//'
+}
+
+pkg_ver_from_filename() {
+    local fname="$1" name="$2"
+    echo "${fname#"$name"-}" | sed -E 's/-[^-]+\.pkg\.tar\.zst$//'
+}
+
+html_escape() {
+    sed -e 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'
+}
+
+# Renders repo/index.html from the database just written by repo-add (so it
+# always reflects the actual publish state, the same source of truth
+# bin/clean uses) plus whatever's on disk in repo/ for "older versions" --
+# never file mtime or a guessed version order. Runs on the host either way
+# (even after the Docker repo-add fallback below) since it only needs tar/
+# awk/sort, no pacman tools.
+generate_index() {
+    echo "==> Generating $REPO_DIR/index.html" >&2
+
+    local extract_dir
+    extract_dir="$(mktemp -d)"
+    trap 'rm -rf "$extract_dir"' RETURN
+    tar -xzf "$REPO_DIR/$REPO_NAME.db.tar.gz" -C "$extract_dir"
+
+    declare -A cur_file cur_ver cur_desc cur_csize cur_bdate
+    local desc_file name
+    while IFS= read -r -d '' desc_file; do
+        name="$(awk '/^%NAME%$/{getline; print; exit}' "$desc_file")"
+        cur_file[$name]="$(awk '/^%FILENAME%$/{getline; print; exit}' "$desc_file")"
+        cur_ver[$name]="$(awk '/^%VERSION%$/{getline; print; exit}' "$desc_file")"
+        cur_desc[$name]="$(awk '/^%DESC%$/{getline; print; exit}' "$desc_file")"
+        cur_csize[$name]="$(awk '/^%CSIZE%$/{getline; print; exit}' "$desc_file")"
+        cur_bdate[$name]="$(awk '/^%BUILDDATE%$/{getline; print; exit}' "$desc_file")"
+    done < <(find "$extract_dir" -name desc -print0)
+
+    declare -A all_files
+    local f fname pname
+    for f in "$REPO_DIR"/*.pkg.tar.zst; do
+        fname="$(basename "$f")"
+        pname="$(pkg_name_from_filename "$fname")"
+        all_files[$pname]+="$fname"$'\n'
+    done
+
+    local total_size=0 pkg_count=${#cur_file[@]}
+    for f in "$REPO_DIR"/*.pkg.tar.zst; do
+        total_size=$((total_size + $(stat -c%s "$f")))
+    done
+
+    # Best-effort convenience value for the pacman.conf snippet -- the repo
+    # itself doesn't know what host/port it's reachable at (see CLAUDE.md:
+    # the LAN IP here is DHCP-assigned, not static), so this is just today's
+    # answer, not a promise.
+    local host_ip host_port
+    host_ip="$(hostname -I 2>/dev/null | awk '{print $1}')" || host_ip=""
+    [ -n "$host_ip" ] || host_ip="<this-host-ip>"
+    host_port="$(grep -oE '"[0-9]+:80"' "$ROOT/docker-compose.yml" 2>/dev/null | head -1 | grep -oE '^"[0-9]+' | tr -d '"')"
+    [ -n "$host_port" ] || host_port="8080"
+
+    local out="$REPO_DIR/index.html.new"
+    cat > "$out" <<HTML
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$REPO_NAME</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --border: #dde1e6;
+    --text: #1b1f24;
+    --muted: #5b6472;
+    --accent: #1f7a5c;
+    --accent-contrast: #ffffff;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --surface: #1c1f25;
+      --border: #2c313a;
+      --text: #e7eaee;
+      --muted: #8b93a1;
+      --accent: #4fd1a5;
+      --accent-contrast: #08130f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.45;
+  }
+  header {
+    padding: 2.5rem 1.5rem 1.5rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-family: var(--mono);
+    font-size: 1.6rem;
+    margin: 0 0 0.25rem;
+    letter-spacing: -0.02em;
+  }
+  h1 .dim { color: var(--muted); font-weight: 400; }
+  .tagline { color: var(--muted); margin: 0 0 1.25rem; }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.2rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 1.5rem;
+  }
+  .stats strong { color: var(--text); }
+  .conf {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    position: relative;
+  }
+  .conf h2 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 0 0 0.6rem;
+    font-weight: 600;
+  }
+  .conf pre {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .conf button {
+    position: absolute;
+    top: 0.9rem;
+    right: 0.9rem;
+    font-size: 0.75rem;
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .conf button:hover { border-color: var(--accent); color: var(--accent); }
+  main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 1.5rem 3rem;
+  }
+  #search {
+    width: 100%;
+    padding: 0.65rem 0.9rem;
+    margin-bottom: 1.25rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.95rem;
+  }
+  #search:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  #count { color: var(--muted); font-size: 0.8rem; margin: 0 0 1rem; }
+  .pkg {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 0.7rem;
+  }
+  .pkg-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.7rem;
+  }
+  .pkg-name {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 1.02rem;
+  }
+  .pkg-ver {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--accent-contrast);
+    background: var(--accent);
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    text-decoration: none;
+  }
+  .pkg-ver:hover { filter: brightness(1.08); }
+  .pkg-meta {
+    margin-left: auto;
+    font-size: 0.78rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .pkg-desc {
+    margin: 0.45rem 0 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  details { margin-top: 0.5rem; }
+  summary {
+    font-size: 0.78rem;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .old-list {
+    margin: 0.5rem 0 0;
+    padding: 0;
+    list-style: none;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+  }
+  .old-list li {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.25rem 0;
+    border-top: 1px dashed var(--border);
+  }
+  .old-list a { color: var(--text); }
+  .old-list span { color: var(--muted); white-space: nowrap; }
+  footer {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 1.5rem 3rem;
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <h1>$REPO_NAME <span class="dim">// pacman repo</span></h1>
+  <p class="tagline">Curated gaming package stack for Omarchy -- built and hosted from our own infrastructure, no AUR at runtime.</p>
+  <p class="stats">
+    <span><strong>$pkg_count</strong> packages</span>
+    <span><strong>$(numfmt --to=iec "$total_size")</strong> on disk</span>
+    <span>published <strong>$(date '+%Y-%m-%d %H:%M %Z')</strong></span>
+  </p>
+  <div class="conf">
+    <h2>pacman.conf</h2>
+    <button onclick="navigator.clipboard.writeText(document.getElementById('confsnippet').textContent)">Copy</button>
+    <pre id="confsnippet">[$REPO_NAME]
+SigLevel = Optional TrustAll
+Server = http://$host_ip:$host_port</pre>
+  </div>
+</header>
+<main>
+  <input id="search" type="search" placeholder="Filter packages..." autocomplete="off">
+  <p id="count"></p>
+HTML
+
+    local sorted_names
+    mapfile -t sorted_names < <(printf '%s\n' "${!cur_file[@]}" | sort)
+
+    for name in "${sorted_names[@]}"; do
+        local ver="${cur_ver[$name]}" desc="${cur_desc[$name]}" fname="${cur_file[$name]}"
+        local csize="${cur_csize[$name]:-0}" bdate="${cur_bdate[$name]:-0}"
+        local desc_esc ver_esc
+        desc_esc="$(printf '%s' "$desc" | html_escape)"
+        ver_esc="$(printf '%s' "$ver" | html_escape)"
+
+        local older=()
+        mapfile -t older < <(printf '%s' "${all_files[$name]:-}" | grep -v '^$' | grep -vxF "$fname" | sort -Vr)
+
+        {
+            printf '  <div class="pkg" data-name="%s">\n' "$name"
+            printf '    <div class="pkg-head">\n'
+            printf '      <span class="pkg-name">%s</span>\n' "$name"
+            printf '      <a class="pkg-ver" href="%s">%s</a>\n' "$fname" "$ver_esc"
+            printf '      <span class="pkg-meta">%s &middot; %s</span>\n' \
+                "$(numfmt --to=iec "$csize")" "$(date -d "@$bdate" '+%Y-%m-%d')"
+            printf '    </div>\n'
+            [ -n "$desc_esc" ] && printf '    <p class="pkg-desc">%s</p>\n' "$desc_esc"
+            if [ ${#older[@]} -gt 0 ]; then
+                printf '    <details>\n      <summary>%d older version%s</summary>\n      <ul class="old-list">\n' \
+                    "${#older[@]}" "$([ ${#older[@]} -eq 1 ] || echo s)"
+                local of osize
+                for of in "${older[@]}"; do
+                    osize="$(stat -c%s "$REPO_DIR/$of" 2>/dev/null || echo 0)"
+                    printf '        <li><a href="%s">%s</a><span>%s</span></li>\n' \
+                        "$of" "$(pkg_ver_from_filename "$of" "$name" | html_escape)" "$(numfmt --to=iec "$osize")"
+                done
+                printf '      </ul>\n    </details>\n'
+            fi
+            printf '  </div>\n'
+        } >> "$out"
+    done
+
+    cat >> "$out" <<HTML
+</main>
+<footer>
+  <p>Autoindex still available for direct file access. Source: <a href="https://github.com/">omarchy-gaming</a>.</p>
+</footer>
+<script>
+  const search = document.getElementById('search');
+  const pkgs = [...document.querySelectorAll('.pkg')];
+  const count = document.getElementById('count');
+  function apply() {
+    const q = search.value.trim().toLowerCase();
+    let shown = 0;
+    for (const p of pkgs) {
+      const match = !q || p.dataset.name.toLowerCase().includes(q) || p.textContent.toLowerCase().includes(q);
+      p.hidden = !match;
+      if (match) shown++;
+    }
+    count.textContent = shown + ' / ' + pkgs.length + ' packages';
+  }
+  search.addEventListener('input', apply);
+  apply();
+</script>
+</body>
+</html>
+HTML
+
+    mv -f "$out" "$REPO_DIR/index.html"
 }
 
 sign_args=()
@@ -123,3 +461,5 @@ else
 fi
 
 echo "==> Published latest-version database to $REPO_NAME.db.tar.gz (${#all_names[@]} package file(s) on disk in $REPO_DIR, including any superseded rollback versions)"
+
+generate_index

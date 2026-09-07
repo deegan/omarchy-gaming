@@ -288,3 +288,27 @@ launched a game via Steam). What's left:
    be more durable than "point pacman at whatever IP this dev machine currently has."
 3. `omarchy-kernel-gaming` is currently behind CachyOS's newest tag, but that tag is an
    `-rc` prerelease — worth another look once CachyOS cuts a real release, not before.
+4. Mesa/lib32-mesa (still pkgver 26.2.1) currently fail to *rebuild*: `bin/build mesa
+   lib32-mesa` breaks in rusticl's Rust bindings with `error[E0605]: non-primitive cast:
+   pipe_resource_usage as u32` (and the same for `pipe_map_flags`). Root-caused: this is a
+   genuine upstream Mesa bug, not anything in our PKGBUILD (which is still an unmodified,
+   verbatim copy of CachyOS's own on this point) — `struct pipe_resource`/`struct
+   pipe_transfer` in `p_state.h` declare `usage` as a real C bitfield (`enum
+   pipe_resource_usage usage:4`, `enum pipe_map_flags usage:24`), but rusticl's
+   `meson.build` also marks both types `--bitfield-enum` for bindgen (needed because
+   `pipe_map_flags` genuinely gets bitwise-OR'd in `core/device.rs`/`mesa/pipe/context.rs`),
+   which makes bindgen emit them as newtype structs — and bindgen's own bitfield-accessor
+   codegen for the C-bitfield fields still emits a bare `as` cast that only works on
+   primitives/real enums, not the newtype it just generated. Reproduced identically against
+   both current Arch `extra` bindgen (0.73.1) and Mesa's own stated minimum (0.71.1), so
+   it's not a "pin an older bindgen" fix. A real fix means patching core Gallium struct
+   layout (`pipe_resource`/`pipe_transfer`, used by every driver) or dropping rusticl
+   (`-D gallium-rusticl=false`) — both rejected for now in favor of just waiting for
+   upstream to fix it, since we don't want to drift from CachyOS's PKGBUILD.
+   **This does not affect what's already published**: `repo/` still has the working,
+   previously-verified `26.2.1-2` build (the one confirmed via AVX2 disassembly and a real
+   install) — only a *rebuild* is currently blocked. Also worth noting: `bin/build`'s
+   container floats on `archlinux:latest` + `pacman -Syu` with no pinned toolchain
+   versions, so this broke between sessions purely from the build environment moving
+   forward, not from anything changing in this repo — the same could happen again, in
+   either direction, on any package's next rebuild.
