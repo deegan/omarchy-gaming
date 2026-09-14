@@ -273,42 +273,82 @@ values from upstream's own published checksums/digests, not just "didn't crash."
 what it bumps is still a separate, explicit `bin/build <pkg>...` step (the line
 `check-updates --fix` prints) — it does not chain into a build itself.
 
+**2026-09-14: all 4 remaining outdated packages bumped by hand** (`goverlay` 1.9.0→1.9.2,
+`mesa`/`lib32-mesa` 26.2.1→26.2.2, `omarchy-kernel-gaming` 7.2.1-1→7.2.5-1) — `--fix`
+still won't touch these (the script itself wasn't changed), but this session established
+that "needs real judgment" doesn't mean "needs heavy vetting" in practice, and did the
+manual work once as a template for next time:
+- `goverlay`: no published manifest exists for a GitHub-generated tag archive, so the
+  checksum came from downloading the tarball once and hashing it. Previously avoided as
+  circular (fingerprinting whatever you downloaded proves nothing on its own) — accepted
+  now because the actual safety net for a bad build here is Omarchy's snapshot/rollback,
+  not a pristine supply chain audit trail. That tradeoff call belongs to the user, and
+  they made it explicitly this session, so treat "safe" from here on as "reversible if
+  wrong," not "provably unmodified."
+- `mesa`/`lib32-mesa`: fetched CachyOS's own current `mesa/{mesa,lib32-mesa}/PKGBUILD`
+  from `github.com/CachyOS/CachyOS-PKGBUILDS` and diffed it against ours — their repo
+  *is* the manifest for a package that's a near-verbatim copy of theirs, so this isn't a
+  "download and hash it ourselves" bump at all, just reading a (larger) manifest. The
+  diff was clean: only `pkgver` and the mesa tarball's own `sha256`/`b2` sum (index 0)
+  changed, all ~30 vendored Rust crate checksums and the driver matrix were untouched.
+  Re-applied our one-line `-march=x86-64-v3` `CFLAGS`/`CXXFLAGS`/`RUSTFLAGS` diff on top.
+  **This is the general technique for any future mesa/lib32-mesa bump**: diff against
+  CachyOS's current PKGBUILD first; only fall back to real vetting if that diff isn't
+  clean.
+- **The rusticl/bindgen build failure that previously blocked rebuilding mesa no longer
+  reproduces.** A prior session found `mesa` 26.2.1 failed with
+  `error[E0605]: non-primitive cast: pipe_resource_usage as u32` (and the same for
+  `pipe_map_flags`) — a real upstream bug where rusticl's `meson.build` marks two Gallium
+  struct fields `--bitfield-enum` for bindgen, but bindgen's own C-bitfield-accessor
+  codegen still emits a bare `as` cast that only works on primitives, not the newtype it
+  just generated. `mesa` 26.2.2 built clean in the same `archlinux:latest` container that
+  failed on 26.2.1. Root cause presumed fixed upstream between those versions (not
+  independently confirmed via a Mesa changelog, just observed: same build environment,
+  same PKGBUILD shape, only the mesa source version changed). `lib32-mesa` was never
+  actually affected
+  by this bug in the first place — its cross-build doesn't hit the rusticl Rust bindings
+  the same way; that was previously obscured by a real gap in `bin/build` itself: passing
+  it an explicit package list (`bin/build mesa lib32-mesa`) has no per-package error
+  isolation, unlike the no-args build-all path — a failure early in an explicit list
+  aborts the whole invocation via `set -e`, silently skipping everything listed after it.
+  Not fixed this session; worth fixing in `bin/build` before it causes a silently-partial
+  batch bump again.
+- `omarchy-kernel-gaming`: bumped `_minor` 1→5 and the source tarball's `sha256` via the
+  same GitHub-API-digest technique the auto-fixable packages already use. Before bumping,
+  fetched CachyOS's current `kernel-patches/7.2/sched/0001-bore-cachy.patch` and
+  `linux-cachyos/linux-cachyos-bore/config` and diffed both against our vendored copies —
+  byte-identical, so no patch/config re-vetting was actually needed this time. Updated
+  the header comment's pinned-commit URLs to the commits those diffs were taken from.
+  Built and published successfully at `7.2.5-1`.
+
+All 12 `nvchecker`-tracked packages report "up to date" as of this bump.
+
 ## Next steps
 
 All items in the original tier list (Tiers 1-4) are now built, published, and verified as
 far as this local dev environment and one real spare machine allow. `proton-cachyos` has
 now additionally been validated on the actual gaming rig this was all built for (install +
-launched a game via Steam). What's left:
+launched a game via Steam). All 12 `nvchecker`-tracked packages are at the latest upstream
+version as of 2026-09-14 (see the Progress note above for how the 4 non-`--fix`-eligible
+ones — `goverlay`, `mesa`, `lib32-mesa`, `omarchy-kernel-gaming` — were bumped by hand).
+What's left:
 
 1. Mesa: boot into a real graphical session with it installed and confirm nothing broke
    (games render, compositor works, no black-screen/crash-loop) — the one thing this
-   session couldn't test.
+   session couldn't test. Still open at `26.2.2`, same as it was at `26.2.1` — nothing
+   about the version bump changes this risk.
 2. Longer-term: the repo is still unsigned (see above) and the host's LAN IP is DHCP-
    assigned, not static — both fine for now, both worth revisiting if this setup needs to
    be more durable than "point pacman at whatever IP this dev machine currently has."
-3. `omarchy-kernel-gaming` is currently behind CachyOS's newest tag, but that tag is an
-   `-rc` prerelease — worth another look once CachyOS cuts a real release, not before.
-4. Mesa/lib32-mesa (still pkgver 26.2.1) currently fail to *rebuild*: `bin/build mesa
-   lib32-mesa` breaks in rusticl's Rust bindings with `error[E0605]: non-primitive cast:
-   pipe_resource_usage as u32` (and the same for `pipe_map_flags`). Root-caused: this is a
-   genuine upstream Mesa bug, not anything in our PKGBUILD (which is still an unmodified,
-   verbatim copy of CachyOS's own on this point) — `struct pipe_resource`/`struct
-   pipe_transfer` in `p_state.h` declare `usage` as a real C bitfield (`enum
-   pipe_resource_usage usage:4`, `enum pipe_map_flags usage:24`), but rusticl's
-   `meson.build` also marks both types `--bitfield-enum` for bindgen (needed because
-   `pipe_map_flags` genuinely gets bitwise-OR'd in `core/device.rs`/`mesa/pipe/context.rs`),
-   which makes bindgen emit them as newtype structs — and bindgen's own bitfield-accessor
-   codegen for the C-bitfield fields still emits a bare `as` cast that only works on
-   primitives/real enums, not the newtype it just generated. Reproduced identically against
-   both current Arch `extra` bindgen (0.73.1) and Mesa's own stated minimum (0.71.1), so
-   it's not a "pin an older bindgen" fix. A real fix means patching core Gallium struct
-   layout (`pipe_resource`/`pipe_transfer`, used by every driver) or dropping rusticl
-   (`-D gallium-rusticl=false`) — both rejected for now in favor of just waiting for
-   upstream to fix it, since we don't want to drift from CachyOS's PKGBUILD.
-   **This does not affect what's already published**: `repo/` still has the working,
-   previously-verified `26.2.1-2` build (the one confirmed via AVX2 disassembly and a real
-   install) — only a *rebuild* is currently blocked. Also worth noting: `bin/build`'s
-   container floats on `archlinux:latest` + `pacman -Syu` with no pinned toolchain
-   versions, so this broke between sessions purely from the build environment moving
-   forward, not from anything changing in this repo — the same could happen again, in
-   either direction, on any package's next rebuild.
+3. `bin/build`'s explicit-package-list invocation (`bin/build pkg1 pkg2 ...`) has no
+   per-package error isolation — one failure aborts the whole list via `set -e`, unlike
+   the no-args build-all path which collects failures and keeps going. This silently
+   skipped `lib32-mesa`'s and `omarchy-kernel-gaming`'s builds behind `mesa`'s failure
+   earlier this session and wasn't caught until checked by hand. Worth fixing to match
+   the build-all path's per-package `|| failed+=(...)` handling.
+4. Consider whether `bin/check-updates --fix`'s `BUMP_FN`/`MANUAL_REASON` split should be
+   extended to cover `goverlay`/`mesa`/`lib32-mesa`/`omarchy-kernel-gaming` now that this
+   session established a repeatable technique for each (download-once-to-hash for
+   goverlay; diff against CachyOS's own current PKGBUILD for mesa/lib32-mesa; GitHub-
+   digest tarball checksum + patch/config diff for the kernel) — not done yet, this
+   session's bumps were manual, following but not automating that process.

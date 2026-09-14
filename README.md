@@ -253,6 +253,30 @@ whether it changed. Bumping something outside that list is manual: edit its PKGB
 release manifest/API rather than downloading the artifact just to hash it, and reset
 `pkgrel` to `1`.
 
+**Bumping the excluded packages in practice**: this repo's own instance has bumped all
+four by hand more than once, and none of them turned out to need deep manual review:
+- `goverlay`/`gamemode`/`steamtinkerlaunch`: their tag archives genuinely have no
+  published checksum anywhere, so there's no way around downloading the tarball once to
+  hash it. That's a reasonable tradeoff here — a bad build is cheaply reversible (Omarchy
+  snapshots, or just not upgrading a client to the new version), so "the checksum matches
+  what we ourselves just fetched" is enough, it doesn't need to be independently
+  verified against a third party the way a public distro repo would require.
+- `mesa`/`lib32-mesa`: both PKGBUILDs are near-verbatim copies of CachyOS's own
+  (`github.com/CachyOS/CachyOS-PKGBUILDS`), so the fastest and most reliable way to bump
+  them is to fetch CachyOS's current PKGBUILD and diff it against ours, rather than
+  hand-editing checksums — their file *is* the manifest for a package this close to a
+  straight copy. In practice the diff between consecutive Mesa versions has been clean
+  (only `pkgver` and the mesa tarball's own checksum change, not the ~30 vendored Rust
+  crate checksums or the driver matrix) — re-apply the one-line `-march=x86-64-v3`
+  `CFLAGS`/`CXXFLAGS`/`RUSTFLAGS` diff on top and build.
+- `omarchy-kernel-gaming`: bump `_minor`/`_tagrel` and get the new source tarball's
+  checksum via the same GitHub API `digest` technique `--fix` already uses for
+  `heroic-games-launcher-bin`/`protonup-qt`. Before assuming the vendored BORE patch and
+  base `.config` are still fine, diff them against CachyOS's current
+  `kernel-patches`/`linux-cachyos` repos — if they're unchanged since the commit this
+  repo pinned to, no further re-vetting is needed; if they've moved, that's the actual
+  judgment call the manual-bump list exists for.
+
 ## Reclaiming disk space
 
 `bin/build` never deletes a package's older versions — every one it has ever built for a
