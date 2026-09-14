@@ -1,6 +1,6 @@
 # Maintainer: omarchy-gaming
 pkgname=goverlay
-pkgver=1.9.0
+pkgver=1.9.2
 pkgrel=1
 pkgdesc="GUI to manage MangoHud, vkBasalt and other Vulkan/OpenGL overlay tools"
 arch=('x86_64')
@@ -13,7 +13,7 @@ optdepends=('vkbasalt: configure vkBasalt'
             'vulkan-tools: Vulkan preview'
             'replay-sorcery: instant replay solution')
 source=("$url/archive/refs/tags/$pkgver.tar.gz")
-sha256sums=('57f16d48d592e795d684f55d359ff6cf26b02f810d974c31d278d327d4b8858d')
+sha256sums=('d36b8a5b89bff0d8144efb57cbd315107502588818a2522cf32a2075c837de8c')
 
 build() {
     cd "$pkgname-$pkgver"
