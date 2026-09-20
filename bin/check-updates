@@ -5,10 +5,17 @@
 #
 # By default this is read-only: never edits a PKGBUILD, never builds or
 # downloads a package artifact. Pass --fix to have it bump pkgver/checksums
-# itself for whichever outdated packages that's safe to automate (see
-# BUMP_FN below) -- for the rest (no published checksum anywhere, or a
-# PKGBUILD that needs real judgment, not just a version swap), it still
-# just tells you and leaves the PKGBUILD alone.
+# itself for whichever outdated packages that's safe to automate the boring
+# way (see BUMP_FN below) -- a published upstream manifest/digest means no
+# artifact ever needs downloading just to hash it.
+#
+# Pass --fix-all to also cover the packages that need more than a checksum
+# swap (see BUMP_FN_RISKY below): downloading a tag archive once to hash it
+# (no published checksum exists at all for a GitHub-generated tag archive),
+# or re-syncing against an upstream PKGBUILD/patch/config first and only
+# proceeding if that re-sync diff is clean. Either flag still leaves
+# anything it can't safely automate -- a real structural change upstream,
+# not just a version bump -- untouched and tells you why.
 #
 # Requires `jq` on the host. Uses the host's `nvchecker` if it's in PATH,
 # otherwise runs it in a throwaway archlinux container (same pattern as
@@ -16,11 +23,13 @@
 set -euo pipefail
 
 fix_mode=false
+fix_all_mode=false
 for arg in "$@"; do
     case "$arg" in
         --fix) fix_mode=true ;;
+        --fix-all) fix_mode=true; fix_all_mode=true ;;
         *)
-            echo "usage: $(basename "$0") [--fix]" >&2
+            echo "usage: $(basename "$0") [--fix|--fix-all]" >&2
             exit 1
             ;;
     esac
@@ -121,18 +130,27 @@ fi
 # every uploaded release asset), so bumping never requires downloading the
 # artifact just to hash it.
 #
-# Packages left out of BUMP_FN, and why:
+# Packages left to BUMP_FN_RISKY instead (only touched with --fix-all), and
+# why they're a different risk tier:
 #  - goverlay/gamemode/steamtinkerlaunch: source is a GitHub-generated tag
 #    archive (archive/refs/tags/... or archive/vX.tar.gz), not an uploaded
-#    release asset -- no manifest, no API digest, nothing to fetch without
-#    downloading the tarball to hash it ourselves.
+#    release asset -- no manifest, no API digest published anywhere, so the
+#    only way to get a checksum is downloading the tarball and hashing it
+#    ourselves. That's circular as supply-chain verification (it only
+#    proves the file didn't change in transit just now), but was judged an
+#    acceptable tradeoff given Omarchy's snapshot/rollback is the actual
+#    safety net for a bad build here, not a pristine audit trail.
 #  - mesa/lib32-mesa: PKGBUILD is close to a verbatim copy of CachyOS's own,
 #    which can change shape (driver list, patches) between versions, not
 #    just pkgver -- a version-only bump risks silently going stale on the
-#    rest of the recipe.
+#    rest of the recipe. BUMP_FN_RISKY re-fetches CachyOS's current
+#    PKGBUILD and only proceeds if everything outside pkgver/pkgrel/epoch/
+#    the first checksum entry is byte-identical to ours.
 #  - omarchy-kernel-gaming: BORE patch + base .config are vendored and
 #    pinned to specific CachyOS commits, which need re-vetting against the
-#    new kernel version, not just a version swap.
+#    new kernel version, not just a version swap. BUMP_FN_RISKY re-fetches
+#    both from CachyOS and only proceeds if they're byte-identical to our
+#    vendored copies.
 
 raw_tag_for() {
     jq -r --arg p "$1" '.data[$p].gitref // empty' "$NEWVER_FILE" | sed 's#^refs/tags/##'
@@ -242,12 +260,222 @@ declare -A BUMP_FN=(
 )
 
 declare -A MANUAL_REASON=(
-    [goverlay]="no published checksum upstream (tag archive, not a release asset)"
-    [gamemode]="no published checksum upstream (tag archive, not a release asset)"
-    [steamtinkerlaunch]="no published checksum upstream (tag archive, not a release asset)"
-    [mesa]="PKGBUILD may need re-syncing with CachyOS's own copy, not just a version bump"
-    [lib32-mesa]="PKGBUILD may need re-syncing with CachyOS's own copy, not just a version bump"
-    [omarchy-kernel-gaming]="vendored/pinned BORE patch needs re-vetting, not just a version bump"
+    [goverlay]="no published checksum upstream (tag archive, not a release asset) -- rerun with --fix-all"
+    [gamemode]="no published checksum upstream (tag archive, not a release asset) -- rerun with --fix-all"
+    [steamtinkerlaunch]="no published checksum upstream (tag archive, not a release asset) -- rerun with --fix-all"
+    [mesa]="PKGBUILD may need re-syncing with CachyOS's own copy, not just a version bump -- rerun with --fix-all"
+    [lib32-mesa]="PKGBUILD may need re-syncing with CachyOS's own copy, not just a version bump -- rerun with --fix-all"
+    [omarchy-kernel-gaming]="vendored/pinned BORE patch needs re-vetting, not just a version bump -- rerun with --fix-all"
+)
+
+# --- --fix-all: also cover BUMP_FN_RISKY, the packages above that need more
+# than a checksum swap. Each function here still leaves the PKGBUILD alone
+# and returns 1 (falling into the same "failed" bucket as a BUMP_FN
+# checksum-fetch failure) the moment its own safety check doesn't come back
+# clean -- these never partially apply a bump.
+
+fetch_hash_of_download() {  # fetch_hash_of_download url -- sha256 of a one-time download
+    local url="$1" tmpfile
+    tmpfile="$(mktemp)"
+    if ! curl -fsSL "$url" -o "$tmpfile"; then
+        rm -f "$tmpfile"
+        return 1
+    fi
+    sha256sum "$tmpfile" | awk '{print $1}'
+    rm -f "$tmpfile"
+}
+
+bump_goverlay() {
+    local pkgdir="$PKGBUILDS_DIR/goverlay" new_pkgver hash
+    new_pkgver="$(new_version_for goverlay)"
+    hash="$(fetch_hash_of_download "https://github.com/benjamimgois/goverlay/archive/refs/tags/${new_pkgver}.tar.gz")" \
+        || { echo "  ! failed to download the tag archive to hash it" >&2; return 1; }
+    set_var "$pkgdir/PKGBUILD" pkgver "$new_pkgver"
+    set_var "$pkgdir/PKGBUILD" pkgrel 1
+    set_first_sum "$pkgdir/PKGBUILD" sha256 "$hash"
+}
+
+bump_gamemode() {
+    local pkgdir="$PKGBUILDS_DIR/gamemode" new_pkgver hash
+    new_pkgver="$(new_version_for gamemode)"
+    hash="$(fetch_hash_of_download "https://github.com/FeralInteractive/gamemode/archive/refs/tags/${new_pkgver}.tar.gz")" \
+        || { echo "  ! failed to download the tag archive to hash it" >&2; return 1; }
+    set_var "$pkgdir/PKGBUILD" pkgver "$new_pkgver"
+    set_var "$pkgdir/PKGBUILD" pkgrel 1
+    set_first_sum "$pkgdir/PKGBUILD" sha256 "$hash"
+}
+
+bump_steamtinkerlaunch() {
+    local pkgdir="$PKGBUILDS_DIR/steamtinkerlaunch" new_pkgver tag hash
+    new_pkgver="$(new_version_for steamtinkerlaunch)"
+    tag="$(raw_tag_for steamtinkerlaunch)"
+    hash="$(fetch_hash_of_download "https://github.com/sonic2kk/steamtinkerlaunch/archive/${tag}.tar.gz")" \
+        || { echo "  ! failed to download the tag archive to hash it" >&2; return 1; }
+    set_var "$pkgdir/PKGBUILD" pkgver "$new_pkgver"
+    set_var "$pkgdir/PKGBUILD" pkgrel 1
+    set_first_sum "$pkgdir/PKGBUILD" sha256 "$hash"
+}
+
+fetch_cachyos_pkgbuild() {  # fetch_cachyos_pkgbuild <subpath in CachyOS/CachyOS-PKGBUILDS>
+    curl -fsSL "https://raw.githubusercontent.com/CachyOS/CachyOS-PKGBUILDS/master/$1/PKGBUILD"
+}
+
+# Strips our own two customizations back out of a mesa/lib32-mesa PKGBUILD
+# (our explanatory header block, and the omarchy-gaming x86-64-v3 override
+# block just inside build()) so what's left is directly diffable against
+# CachyOS's own PKGBUILD. Both blocks -- and where our header block ends --
+# are located from the file itself, not a hardcoded marker string: mesa/mesa
+# and mesa/lib32-mesa don't actually share the same upstream header shape
+# (only the former has a "### Arch Linux PKGBUILD Maintainers:" line), so
+# the anchor has to be "wherever upstream's own first line reappears in our
+# file", not a fixed string that happens to work for one of the two.
+strip_our_mesa_customizations() {  # strip_our_mesa_customizations <pkgbuild path> <upstream's first line>
+    awk -v anchor="$2" '
+        $0 == anchor { header_done = 1 }
+        !header_done { next }
+        /^  # omarchy-gaming: x86-64-v3/ { skipping = 1; next }
+        skipping { if (/^$/) skipping = 0; next }
+        { print }
+    ' "$1"
+}
+
+# Blanks the fields a routine bump is expected to touch, so the remaining
+# diff reflects real recipe drift instead of just "a newer version exists".
+normalize_mesa_versions() {
+    sed -E \
+        -e 's/^pkgver=.*/pkgver=NORMALIZED/' \
+        -e 's/^pkgrel=.*/pkgrel=NORMALIZED/' \
+        -e 's/^epoch=.*/epoch=NORMALIZED/' \
+        -e "0,/^sha256sums=\\('/{s/^sha256sums=\\('[^']*'/sha256sums=('NORMALIZED'/}" \
+        -e "0,/^b2sums=\\('/{s/^b2sums=\\('[^']*'/b2sums=('NORMALIZED'/}"
+}
+
+bump_mesa_family() {  # bump_mesa_family <pkgbuilds/ dir name> <CachyOS-PKGBUILDS subpath>
+    local pkg="$1" subpath="$2" pkgdir="$PKGBUILDS_DIR/$1"
+    local upstream anchor diff_out
+    upstream="$(mktemp)"
+    if ! fetch_cachyos_pkgbuild "$subpath" >"$upstream"; then
+        echo "  ! failed to fetch CachyOS's current $subpath/PKGBUILD" >&2
+        rm -f "$upstream"
+        return 1
+    fi
+    anchor="$(head -n1 "$upstream")"
+    if ! grep -qFx "$anchor" "$pkgdir/PKGBUILD"; then
+        echo "  ! CachyOS's $subpath/PKGBUILD's first line no longer appears anywhere in ours -- can't locate our header block, needs re-syncing by hand" >&2
+        rm -f "$upstream"
+        return 1
+    fi
+
+    diff_out="$(diff <(strip_our_mesa_customizations "$pkgdir/PKGBUILD" "$anchor" | normalize_mesa_versions) \
+                      <(normalize_mesa_versions <"$upstream") || true)"
+    if [ -n "$diff_out" ]; then
+        echo "  ! CachyOS's $subpath/PKGBUILD has diverged beyond pkgver/pkgrel/epoch/checksums -- needs re-vetting by hand, not just a version bump. Diff (ours vs. theirs, both with our customizations stripped and version fields normalized):" >&2
+        echo "$diff_out" | sed 's/^/    /' >&2
+        rm -f "$upstream"
+        return 1
+    fi
+
+    # Clean: everything but the version-y fields already matches, so adopt
+    # CachyOS's new file wholesale (this is what carries over whatever
+    # actually changed -- pkgver, pkgrel, epoch, and/or checksums -- without
+    # us having to special-case which of those moved) and reinsert our two
+    # customization blocks, pulled from our current file, at the same spots.
+    local header_block override_block new_pkgbuild anchor_line
+    header_block="$(mktemp)"
+    anchor_line="$(grep -nFx -m1 "$anchor" "$pkgdir/PKGBUILD" | cut -d: -f1)"
+    head -n "$((anchor_line - 1))" "$pkgdir/PKGBUILD" >"$header_block"
+
+    override_block="$(mktemp)"
+    awk '
+        /^  # omarchy-gaming: x86-64-v3/ { printing = 1 }
+        printing { print; if (/^$/) exit }
+    ' "$pkgdir/PKGBUILD" >"$override_block"
+
+    new_pkgbuild="$(mktemp)"
+    cat "$header_block" "$upstream" >"$new_pkgbuild"
+    awk -v ov="$override_block" '
+        { print }
+        /^build\(\) \{$/ && !done { while ((getline line < ov) > 0) print line; done = 1 }
+    ' "$new_pkgbuild" >"${new_pkgbuild}.ins" && mv "${new_pkgbuild}.ins" "$new_pkgbuild"
+
+    mv "$new_pkgbuild" "$pkgdir/PKGBUILD"
+    rm -f "$upstream" "$header_block" "$override_block"
+}
+
+bump_mesa() { bump_mesa_family mesa mesa/mesa; }
+bump_lib32_mesa() { bump_mesa_family lib32-mesa mesa/lib32-mesa; }
+
+bump_omarchy_kernel_gaming() {
+    local pkgdir="$PKGBUILDS_DIR/omarchy-kernel-gaming"
+    local tag new_major new_minor new_tagrel
+    tag="$(raw_tag_for omarchy-kernel-gaming)"  # e.g. cachyos-7.2.5-1
+    if [[ ! "$tag" =~ ^cachyos-([0-9]+\.[0-9]+)\.([0-9]+)-([0-9]+)$ ]]; then
+        echo "  ! unexpected upstream tag format: $tag" >&2
+        return 1
+    fi
+    new_major="${BASH_REMATCH[1]}"
+    new_minor="${BASH_REMATCH[2]}"
+    new_tagrel="${BASH_REMATCH[3]}"
+
+    local patch_url config_url new_patch new_config
+    patch_url="https://raw.githubusercontent.com/CachyOS/kernel-patches/master/${new_major}/sched/0001-bore-cachy.patch"
+    config_url="https://raw.githubusercontent.com/CachyOS/linux-cachyos/master/linux-cachyos-bore/config"
+    new_patch="$(mktemp)"
+    new_config="$(mktemp)"
+    if ! curl -fsSL "$patch_url" -o "$new_patch" || ! curl -fsSL "$config_url" -o "$new_config"; then
+        echo "  ! failed to fetch CachyOS's current BORE patch/config (possibly restructured for $new_major)" >&2
+        rm -f "$new_patch" "$new_config"
+        return 1
+    fi
+
+    local patch_diff config_diff
+    patch_diff="$(diff "$pkgdir/0001-bore-cachy.patch" "$new_patch" || true)"
+    config_diff="$(diff "$pkgdir/config" "$new_config" || true)"
+    if [ -n "$patch_diff" ] || [ -n "$config_diff" ]; then
+        echo "  ! CachyOS's BORE patch and/or base .config for $new_major differs from our vendored copy -- needs re-vetting by hand, not just a version bump" >&2
+        [ -n "$patch_diff" ] && echo "    patch changed: $patch_url" >&2
+        [ -n "$config_diff" ] && echo "    config changed: $config_url" >&2
+        rm -f "$new_patch" "$new_config"
+        return 1
+    fi
+
+    # Byte-identical to what's already vendored: safe to bump the version
+    # and re-fetch the release tarball's checksum without re-vetting either.
+    local hash
+    hash="$(fetch_github_sha256_digest CachyOS/linux "$tag" "${tag}.tar.gz")"
+    if [ -z "$hash" ]; then
+        echo "  ! failed to fetch GitHub's sha256 digest for ${tag}.tar.gz" >&2
+        rm -f "$new_patch" "$new_config"
+        return 1
+    fi
+
+    set_var "$pkgdir/PKGBUILD" _major "$new_major"
+    set_var "$pkgdir/PKGBUILD" _minor "$new_minor"
+    set_var "$pkgdir/PKGBUILD" _tagrel "$new_tagrel"
+    set_var "$pkgdir/PKGBUILD" pkgrel 1
+    set_first_sum "$pkgdir/PKGBUILD" sha256 "$hash"
+    mv "$new_patch" "$pkgdir/0001-bore-cachy.patch"
+    mv "$new_config" "$pkgdir/config"
+
+    # Best-effort: refresh the header's pinned-commit URLs to point at what
+    # was actually just fetched. Not fatal if GitHub's API is unreachable or
+    # rate-limited -- the bump above is already complete and correct, this
+    # just keeps the header comment's citation current.
+    local patch_commit config_commit
+    patch_commit="$(curl -fsSL "https://api.github.com/repos/CachyOS/kernel-patches/commits?path=${new_major}/sched/0001-bore-cachy.patch&per_page=1" 2>/dev/null | jq -r '.[0].sha // empty' 2>/dev/null || true)"
+    config_commit="$(curl -fsSL "https://api.github.com/repos/CachyOS/linux-cachyos/commits?path=linux-cachyos-bore/config&per_page=1" 2>/dev/null | jq -r '.[0].sha // empty' 2>/dev/null || true)"
+    [ -n "$patch_commit" ] && sed -i -E "s|^#   https://github\\.com/CachyOS/kernel-patches/blob/.*|#   https://github.com/CachyOS/kernel-patches/blob/${patch_commit}/${new_major}/sched/0001-bore-cachy.patch|" "$pkgdir/PKGBUILD"
+    [ -n "$config_commit" ] && sed -i -E "s|^#   https://github\\.com/CachyOS/linux-cachyos/blob/.*|#   https://github.com/CachyOS/linux-cachyos/blob/${config_commit}/linux-cachyos-bore/config|" "$pkgdir/PKGBUILD"
+    sed -i -E "s|^#   https://github\\.com/CachyOS/linux/releases/tag/.*|#   https://github.com/CachyOS/linux/releases/tag/${tag}|" "$pkgdir/PKGBUILD"
+}
+
+declare -A BUMP_FN_RISKY=(
+    [goverlay]=bump_goverlay
+    [gamemode]=bump_gamemode
+    [steamtinkerlaunch]=bump_steamtinkerlaunch
+    [mesa]=bump_mesa
+    [lib32-mesa]=bump_lib32_mesa
+    [omarchy-kernel-gaming]=bump_omarchy_kernel_gaming
 )
 
 if $fix_mode && [ "${#outdated[@]}" -gt 0 ]; then
@@ -257,12 +485,19 @@ if $fix_mode && [ "${#outdated[@]}" -gt 0 ]; then
     failed=()
     manual=()
     for pkg in "${outdated[@]}"; do
+        fn=""
         if [ -n "${BUMP_FN[$pkg]:-}" ]; then
+            fn="${BUMP_FN[$pkg]}"
+        elif $fix_all_mode && [ -n "${BUMP_FN_RISKY[$pkg]:-}" ]; then
+            fn="${BUMP_FN_RISKY[$pkg]}"
+        fi
+
+        if [ -n "$fn" ]; then
             echo "==> Bumping $pkg"
-            if "${BUMP_FN[$pkg]}"; then
+            if "$fn"; then
                 bumped+=("$pkg")
             else
-                echo "  ! fetching the new checksum failed, $pkg left untouched" >&2
+                echo "  ! automatic bump failed, $pkg left untouched (see above)" >&2
                 failed+=("$pkg")
             fi
         else
@@ -278,7 +513,7 @@ if $fix_mode && [ "${#outdated[@]}" -gt 0 ]; then
     fi
     if [ "${#failed[@]}" -gt 0 ]; then
         echo
-        echo "Checksum fetch failed (left untouched, bump these by hand): ${failed[*]}"
+        echo "Automatic bump failed (left untouched, bump these by hand): ${failed[*]}"
     fi
     if [ "${#manual[@]}" -gt 0 ]; then
         echo
@@ -289,8 +524,11 @@ if $fix_mode && [ "${#outdated[@]}" -gt 0 ]; then
     fi
 elif [ "${#outdated[@]}" -gt 0 ]; then
     echo
-    echo "Re-run with --fix to auto-bump whichever of these that's safe to automate,"
-    echo "or bump pkgver/checksums by hand, then build with:"
+    echo "Re-run with --fix to auto-bump whichever of these that's safe to automate"
+    echo "the boring way, or --fix-all to also cover the riskier ones (tag-archive"
+    echo "checksums fetched by downloading once, or mesa/kernel PKGBUILDs re-synced"
+    echo "against upstream first and only bumped if that comes back clean), or bump"
+    echo "pkgver/checksums by hand, then build with:"
     echo "  bin/build ${outdated[*]}"
 fi
 

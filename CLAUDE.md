@@ -126,20 +126,40 @@ file (the GE-Proton/CachyOS pattern) or, for a plain GitHub release asset with n
 manifest, the sha256 `digest` GitHub's own API reports for every uploaded release asset — so
 bumping never means downloading the artifact just to hash it, same rule as a manual bump.
 
-The rest print an explicit reason instead of being touched:
+The rest print an explicit reason instead of being touched, unless you pass `--fix-all`:
+
+```bash
+bin/check-updates --fix-all
+```
+
+which also auto-bumps these, each with its own safety check instead of a published checksum:
 - `goverlay`, `gamemode`, `steamtinkerlaunch`: source is a GitHub-generated tag archive
-  (`archive/refs/tags/...`), not an uploaded release asset — no manifest, no API digest,
-  nothing to fetch without downloading the tarball to hash it ourselves.
+  (`archive/refs/tags/...`), not an uploaded release asset — no manifest, no API digest
+  published anywhere, so `--fix-all` downloads the tarball once and hashes it itself. That's
+  circular as a supply-chain check (it only proves the file didn't change in transit just
+  now), but is an accepted tradeoff — Omarchy's snapshot/rollback is the real safety net for
+  a bad build here, not a pristine audit trail.
 - `mesa`/`lib32-mesa`: the PKGBUILD is close to a verbatim copy of CachyOS's own, which can
   change shape (driver list, patches) between versions — a version-only bump risks silently
-  going stale on the rest of the recipe.
-- `omarchy-kernel-gaming`: as above, needs the BORE patch re-vetted, not just a version swap.
+  going stale on the rest of the recipe. `--fix-all` re-fetches CachyOS's current PKGBUILD,
+  strips our own header comment and x86-64-v3 `build()` override back out, and only proceeds
+  if what's left is byte-identical to theirs outside `pkgver`/`pkgrel`/`epoch`/the first
+  checksum entry — then adopts their file wholesale and reinserts our two customizations.
+- `omarchy-kernel-gaming`: re-fetches CachyOS's current BORE patch and base `.config` and
+  only proceeds if both are byte-identical to what's already vendored (also refreshing the
+  header's pinned-commit URLs on success). If either has actually changed, needs re-vetting
+  by hand as before.
 
-Whether it bumped, failed, or left something for you, `check-updates --fix` finishes by
-printing the right `bin/build <pkg> <pkg> ...` line for whatever it actually changed — run
-that (then `bin/publish`) rather than a bare `bin/build`, which rebuilds everything
-regardless of what changed. Without `--fix`, `check-updates` stays purely a read-only report
-and prints the same kind of `bin/build` line for you to run after bumping by hand.
+Either way, if a package's automatic check doesn't come back clean — a real structural
+change upstream, not just a version bump — `check-updates` leaves it alone and prints why,
+same as a `--fix`-only checksum-fetch failure; it never partially applies a risky bump.
+
+Whether it bumped, failed, or left something for you, `check-updates --fix`/`--fix-all`
+finishes by printing the right `bin/build <pkg> <pkg> ...` line for whatever it actually
+changed — run that (then `bin/publish`) rather than a bare `bin/build`, which rebuilds
+everything regardless of what changed. Without either flag, `check-updates` stays purely a
+read-only report and prints the same kind of `bin/build` line for you to run after bumping by
+hand.
 
 ## Reclaiming disk space
 
@@ -346,9 +366,22 @@ What's left:
    skipped `lib32-mesa`'s and `omarchy-kernel-gaming`'s builds behind `mesa`'s failure
    earlier this session and wasn't caught until checked by hand. Worth fixing to match
    the build-all path's per-package `|| failed+=(...)` handling.
-4. Consider whether `bin/check-updates --fix`'s `BUMP_FN`/`MANUAL_REASON` split should be
-   extended to cover `goverlay`/`mesa`/`lib32-mesa`/`omarchy-kernel-gaming` now that this
-   session established a repeatable technique for each (download-once-to-hash for
-   goverlay; diff against CachyOS's own current PKGBUILD for mesa/lib32-mesa; GitHub-
-   digest tarball checksum + patch/config diff for the kernel) — not done yet, this
-   session's bumps were manual, following but not automating that process.
+4. ~~Consider whether `bin/check-updates --fix`'s `BUMP_FN`/`MANUAL_REASON` split should be
+   extended to cover `goverlay`/`mesa`/`lib32-mesa`/`omarchy-kernel-gaming`~~ — done: added
+   `bin/check-updates --fix-all`, which automates exactly the techniques the manual bump
+   session above established (download-once-to-hash for `goverlay`/`gamemode`/
+   `steamtinkerlaunch`; re-fetch-and-diff-against-CachyOS's-own-PKGBUILD for `mesa`/
+   `lib32-mesa`; GitHub-digest tarball checksum + patch/config byte-diff for
+   `omarchy-kernel-gaming`). See "Auto-bumping with `--fix`" above for the mechanism. Tested
+   against live upstream data (not just a dry run): `mesa` bumped cleanly 26.2.2→26.2.3;
+   `lib32-mesa` initially false-flagged as "diverged" because the safety check anchored on a
+   header line (`### Arch Linux PKGBUILD Maintainers:`) that only `mesa/mesa` actually has
+   upstream, not `mesa/lib32-mesa` — fixed by anchoring on CachyOS's own fetched file's first
+   line instead of a hardcoded string, after which it also bumped cleanly; the real current
+   `omarchy-kernel-gaming` upstream (CachyOS switched from `7.2.x` to `6.18.x` numbering,
+   with a genuinely different BORE patch) correctly fell through to "needs re-vetting by
+   hand" rather than silently applying a stale patch — verified the success path separately
+   with fetches stubbed to return byte-identical patch/config. Not yet exercised as a real
+   `bin/build`-and-publish end to end, since `omarchy-kernel-gaming` didn't actually bump
+   here — treat the first real `--fix-all` mesa/lib32-mesa bump as still worth a diff-review
+   before building, same as any other change to a PKGBUILD.
