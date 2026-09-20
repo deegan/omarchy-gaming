@@ -1,6 +1,6 @@
 # Maintainer: omarchy-gaming
 pkgname=proton-ge-custom
-pkgver=11.6
+pkgver=11.7
 pkgrel=1
 pkgdesc="Custom Proton (GloriousEggroll) with extra patches for gaming, prebuilt binary repack"
 arch=('x86_64')
@@ -8,7 +8,7 @@ url="https://github.com/GloriousEggroll/proton-ge-custom"
 license=('custom')
 options=('!strip' '!debug')
 source=("https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton${pkgver//./-}/GE-Proton${pkgver//./-}-x86_64.tar.gz")
-sha512sums=('543e3af57bb138b1be5a5b98bba4d39ca59340bfa34ec8c12144f3e16d7434ed75bd7a68eafc228b16695884629595af0905156e5227c1898f93cdbc92cb5fcb')
+sha512sums=('7db87e9787e20c35cbdac26018431d5794626b626e4067b050684e45a88cc2ca229d7d263519eafb2e168cde5bef57611065d159d3685aaec152ccb9abe3073f')
 
 package() {
     local instdir="$pkgdir/usr/share/steam/compatibilitytools.d/GE-Proton${pkgver//./-}"
