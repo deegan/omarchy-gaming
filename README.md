@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="omarchy-gaming.png" alt="omarchy-gaming" width="600">
+</p>
+
 # omarchy-gaming
 
 A pacman repository delivering a curated gaming package stack for [Omarchy](https://omarchy.org),
