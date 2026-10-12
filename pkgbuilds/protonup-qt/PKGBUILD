@@ -1,7 +1,7 @@
 # Maintainer: omarchy-gaming
 pkgname=protonup-qt
 _pkgname=ProtonUp-Qt
-pkgver=2.15.1
+pkgver=2.16.0
 pkgrel=1
 pkgdesc="Install and manage GE-Proton, Wine-GE and more for Steam, Lutris and Heroic"
 arch=('x86_64')
@@ -12,7 +12,7 @@ options=('!strip')
 source=("$_pkgname-$pkgver-$CARCH.AppImage::https://github.com/DavidoTek/ProtonUp-Qt/releases/download/v$pkgver/$_pkgname-$pkgver-$CARCH.AppImage"
         'protonup-qt.desktop'
         'protonup-qt')
-sha256sums=('fd78efb1ffa0907a525784462494b9b42938f9fd7c019f3eaea3b8faf837e8c1'
+sha256sums=('862a717502f0b9601f23e849a4b4dfe3d69aed7e7ca262cf1bdc4a553f8de7ec'
             '73a6452ab82b4b977653ed3445763c7907d087e46bfdd6ea61397cf297d99e9e'
             'ec4727c5429e0ad7b571b97a2d1eaf3766d64e2526bd2d924415c326e2482c99')
 
