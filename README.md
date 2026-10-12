@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="omarchy-gaming.png" alt="omarchy-gaming" width="600">
+  <img src="omarchy-gaming.png" alt="omarchy-gaming" width="100%">
 </p>
 
 # omarchy-gaming
