@@ -7,7 +7,8 @@
 A pacman repository delivering a curated gaming package stack for [Omarchy](https://omarchy.org),
 following the same sovereign build philosophy as `omarchy-pkgs`: **no AUR at runtime** — everything
 here is built and hosted from our own infrastructure, from source or verified upstream release
-artifacts, with no `yay`/`paru` step anywhere in the chain.
+artifacts, with no `yay`/`paru` step anywhere in the chain. See also its sibling repository,
+[omarchy-custom](https://github.com/deegan/omarchy-custom).
 
 ## Why use this
 
