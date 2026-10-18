@@ -13,15 +13,15 @@
 #   https://github.com/CachyOS/linux-cachyos/blob/6676e72b85eb9e30d079a8c3dcdf93aedd1e8226/linux-cachyos-bore/config
 # Source tree is CachyOS's own pre-patched release tarball (not raw
 # kernel.org), since that's what the BORE patch is written against:
-#   https://github.com/CachyOS/linux/releases/tag/cachyos-7.2.9-2
+#   https://github.com/CachyOS/linux/releases/tag/cachyos-7.2.11-1
 
 pkgbase=omarchy-kernel-gaming
 pkgname=('omarchy-kernel-gaming' 'omarchy-kernel-gaming-headers')
 _major=7.2
-_minor=9
+_minor=11
 pkgver=${_major}.${_minor}
 pkgrel=1
-_tagrel=2
+_tagrel=1
 _srcname=cachyos-${_major}.${_minor}-${_tagrel}
 pkgdesc="Linux kernel with the BORE scheduler and CachyOS gaming tuning, built x86-64-v3"
 arch=('x86_64')
@@ -33,7 +33,7 @@ makedepends=('bc' 'binutils' 'cpio' 'gettext' 'glibc' 'libelf' 'libgcc' 'openssl
 source=("https://github.com/CachyOS/linux/releases/download/${_srcname}/${_srcname}.tar.gz"
         "0001-bore-cachy.patch"
         "config")
-sha256sums=('2da9e6ffe31436657f46909db059059946dac22c2ac6cde05e49a66d61acfcba'
+sha256sums=('7e212b639092498a11d95cdcf23bbf16690194888bc72766d0ccbb59f5e9844d'
             '1809a4d4d6508a2a3f92cd8b3b385640583f90bd6cee46584f4bf105affd24a0'
             '3df33112e3357feb6a899bbfc006f2ded15226d1b2eb741ac986d581b9ca7773')
 

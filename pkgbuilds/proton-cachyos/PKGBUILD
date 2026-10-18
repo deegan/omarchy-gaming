@@ -1,6 +1,6 @@
 # Maintainer: omarchy-gaming
 pkgname=proton-cachyos
-_srctag=11.0-20261005
+_srctag=11.0-20261014
 pkgver=${_srctag//-/.}
 pkgrel=1
 pkgdesc="CachyOS's performance-tuned Proton (Steam Linux Runtime build, x86-64-v3), prebuilt binary repack"
@@ -11,7 +11,7 @@ options=('!strip' 'emptydirs')
 install=proton-cachyos.install
 source=("https://github.com/CachyOS/proton-cachyos/releases/download/cachyos-${_srctag}-slr/proton-cachyos-${_srctag}-slr-x86_64_v3.tar.xz"
         "ntsync.conf")
-sha512sums=('e8f492e75915486a2cdf29fbd1afd189f750153d053f32395e1171d7df65ac05361a43fa833948092d5e6c18938f658ed7879f92a81a9ad57a14c73034f7f45c'
+sha512sums=('51d1dc0c61860423fa0df9387e5417eb74433b7b41631969b5ebaabf6116f16f5dffdc113aff875c066ac5362d1fe0ec9ec0f1529f8ac787e0138ebf738aa9e0'
             'SKIP')
 
 package() {
