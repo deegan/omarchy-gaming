@@ -9,16 +9,16 @@
 # the package is safe to redistribute.
 #
 # Patch/config are pinned, vendored copies of:
-#   https://github.com/CachyOS/kernel-patches/blob/c9ed808e86cc1f5fafdbe208627533ee10499b5b/7.2/sched/0001-bore-cachy.patch
-#   https://github.com/CachyOS/linux-cachyos/blob/6676e72b85eb9e30d079a8c3dcdf93aedd1e8226/linux-cachyos-bore/config
+#   https://github.com/CachyOS/kernel-patches/blob/f3770b16d069a1bce8dfa63841042137f8b43434/7.3/sched/0001-bore-cachy.patch
+#   https://github.com/CachyOS/linux-cachyos/blob/cbd3c2573e7281c006e8f4dbf4e2dd781542d7f7/linux-cachyos-bore/config
 # Source tree is CachyOS's own pre-patched release tarball (not raw
 # kernel.org), since that's what the BORE patch is written against:
-#   https://github.com/CachyOS/linux/releases/tag/cachyos-7.2.11-1
+#   https://github.com/CachyOS/linux/releases/tag/cachyos-7.3.1-1
 
 pkgbase=omarchy-kernel-gaming
 pkgname=('omarchy-kernel-gaming' 'omarchy-kernel-gaming-headers')
-_major=7.2
-_minor=11
+_major=7.3
+_minor=1
 pkgver=${_major}.${_minor}
 pkgrel=1
 _tagrel=1
@@ -33,9 +33,9 @@ makedepends=('bc' 'binutils' 'cpio' 'gettext' 'glibc' 'libelf' 'libgcc' 'openssl
 source=("https://github.com/CachyOS/linux/releases/download/${_srcname}/${_srcname}.tar.gz"
         "0001-bore-cachy.patch"
         "config")
-sha256sums=('7e212b639092498a11d95cdcf23bbf16690194888bc72766d0ccbb59f5e9844d'
-            '1809a4d4d6508a2a3f92cd8b3b385640583f90bd6cee46584f4bf105affd24a0'
-            '3df33112e3357feb6a899bbfc006f2ded15226d1b2eb741ac986d581b9ca7773')
+sha256sums=('3dba29aa8e7dcda43aee6898e4c66dfbfd997eb5d902510b0faeacc696ddfb3f'
+            'd2eaa8e8dbf1f56bfb304f8b437a7dc30a65408f90a93701367baf8adc2173b4'
+            '81fb56fe326612a0dc4705fc5ec309d04bcfffb487db0cb5843918fe92951927')
 
 export KBUILD_BUILD_HOST=omarchy-gaming
 export KBUILD_BUILD_USER="$pkgbase"
