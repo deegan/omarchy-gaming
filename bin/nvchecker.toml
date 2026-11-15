@@ -65,6 +65,9 @@ prefix = "v"
 source = "github"
 github = "benjamimgois/goverlay"
 use_max_tag = true
+# Skip release candidates: "2.0.0-RC1" sorts above 1.9.x as a max tag, and a
+# hyphen is not even a legal pkgver character.
+exclude_regex = ".*-[Rr][Cc].*"
 
 # --- Tier 2: Arch official, repackaged with tuning ---
 

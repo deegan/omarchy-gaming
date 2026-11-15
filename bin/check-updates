@@ -60,7 +60,10 @@ else
         "$BUILD_IMAGE" \
         bash -c '
             set -e
-            pacman -Sy --noconfirm --needed nvchecker
+            # -Syu, not -Sy: a partial upgrade against a stale base image
+            # breaks whenever Arch reshuffles a package (e.g. openssl-3
+            # split out of openssl -> file conflicts on libcrypto.so.3).
+            pacman -Syu --noconfirm --needed nvchecker
             nvchecker -c nvchecker.toml
         '
 fi

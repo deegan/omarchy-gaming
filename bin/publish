@@ -437,7 +437,8 @@ else
         "$BUILD_IMAGE" \
         bash -c '
             set -e
-            pacman -Sy --noconfirm --needed pacman-contrib gnupg
+            # -Syu, not -Sy: see the same note in bin/check-updates.
+            pacman -Syu --noconfirm --needed pacman-contrib gnupg
 
             dedupe_latest() {
                 local fname name ver
