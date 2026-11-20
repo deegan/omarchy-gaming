@@ -401,6 +401,11 @@ bump_mesa_family() {  # bump_mesa_family <pkgbuilds/ dir name> <CachyOS-PKGBUILD
         /^build\(\) \{$/ && !done { while ((getline line < ov) > 0) print line; done = 1 }
     ' "$new_pkgbuild" >"${new_pkgbuild}.ins" && mv "${new_pkgbuild}.ins" "$new_pkgbuild"
 
+    # CachyOS's pkgrel counts *their* rebuilds of this pkgver, not ours --
+    # adopting it verbatim would skip pkgrel=1 (e.g. land on 26.3.1-2 for our
+    # first build of 26.3.1). Same reset-on-pkgver-bump rule as everywhere else.
+    sed -i 's/^pkgrel=.*/pkgrel=1/' "$new_pkgbuild"
+
     mv "$new_pkgbuild" "$pkgdir/PKGBUILD"
     rm -f "$upstream" "$header_block" "$override_block"
 }

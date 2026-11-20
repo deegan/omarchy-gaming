@@ -144,7 +144,8 @@ which also auto-bumps these, each with its own safety check instead of a publish
   going stale on the rest of the recipe. `--fix-all` re-fetches CachyOS's current PKGBUILD,
   strips our own header comment and x86-64-v3 `build()` override back out, and only proceeds
   if what's left is byte-identical to theirs outside `pkgver`/`pkgrel`/`epoch`/the first
-  checksum entry — then adopts their file wholesale and reinserts our two customizations.
+  checksum entry — then adopts their file wholesale and reinserts our two customizations,
+  resetting `pkgrel` to 1 (CachyOS's `pkgrel` counts their own rebuilds, not ours).
 - `omarchy-kernel-gaming`: re-fetches CachyOS's current BORE patch and base `.config` and
   only proceeds if both are byte-identical to what's already vendored (also refreshing the
   header's pinned-commit URLs on success). If either has actually changed, needs re-vetting
